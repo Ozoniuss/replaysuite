@@ -1,0 +1,361 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-05-20T20:23:30.258477761Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "taskId": "1048587",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "Workflow"
+        },
+        "taskQueue": {
+          "name": "replaysuite-shared",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "IlRlbXBvcmFsIg=="
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "0s",
+        "workflowRunTimeout": "0s",
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "019e470e-c2d2-773d-ac6e-58bd6cb2bcf6",
+        "identity": "325251@fedora@",
+        "firstExecutionRunId": "019e470e-c2d2-773d-ac6e-58bd6cb2bcf6",
+        "attempt": 1,
+        "firstWorkflowTaskBackoff": "0s",
+        "header": {},
+        "workflowId": "replaysuite-env1-TestWorkflowTestSuite_Test_Workflow_BranchActivityFails-run1"
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-05-20T20:23:30.258584129Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "taskId": "1048588",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "replaysuite-shared",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-05-20T20:23:30.266413080Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "taskId": "1048593",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "325251@fedora@",
+        "requestId": "4fa7b7cf-a875-4185-879b-20957cf1328c",
+        "historySizeBytes": "348",
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        }
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-05-20T20:23:30.272849194Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "taskId": "1048597",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "startedEventId": "3",
+        "identity": "325251@fedora@",
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        },
+        "sdkMetadata": {
+          "langUsedFlags": [
+            3
+          ],
+          "sdkName": "temporal-go",
+          "sdkVersion": "1.43.1"
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-05-20T20:23:30.272981403Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "taskId": "1048598",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "5",
+        "activityType": {
+          "name": "GreetActivity"
+        },
+        "taskQueue": {
+          "name": "replaysuite-shared",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "IlRlbXBvcmFsIg=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "0s",
+        "scheduleToStartTimeout": "0s",
+        "startToCloseTimeout": "10s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "4",
+        "retryPolicy": {
+          "initialInterval": "0.001s",
+          "backoffCoefficient": 1,
+          "maximumInterval": "0.001s"
+        },
+        "useWorkflowBuildId": true
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-05-20T20:23:30.275871836Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "taskId": "1048604",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "325251@fedora@",
+        "requestId": "370bfe68-4ea5-4a9c-880a-0b7c11eda139",
+        "attempt": 1,
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        }
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-05-20T20:23:30.279224896Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "taskId": "1048605",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "IkhlbGxvIFRlbXBvcmFsISI="
+            }
+          ]
+        },
+        "scheduledEventId": "5",
+        "startedEventId": "6",
+        "identity": "325251@fedora@"
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-05-20T20:23:30.279244242Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "taskId": "1048606",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "fedora:ac0033e0-09d8-4271-af66-8638c92f6ff0",
+          "kind": "TASK_QUEUE_KIND_STICKY",
+          "normalName": "replaysuite-shared"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-05-20T20:23:30.281301474Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "taskId": "1048610",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "325251@fedora@",
+        "requestId": "de9a1ec2-12e8-44b1-8a12-93b59e34c7a0",
+        "historySizeBytes": "1044",
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        }
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-05-20T20:23:30.284829485Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "taskId": "1048614",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "8",
+        "startedEventId": "9",
+        "identity": "325251@fedora@",
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        },
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-05-20T20:23:30.284881447Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "taskId": "1048615",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "11",
+        "activityType": {
+          "name": "LongPathActivity"
+        },
+        "taskQueue": {
+          "name": "replaysuite-shared",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "IkhlbGxvIFRlbXBvcmFsISI="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "0s",
+        "scheduleToStartTimeout": "0s",
+        "startToCloseTimeout": "10s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "10",
+        "retryPolicy": {
+          "initialInterval": "0.001s",
+          "backoffCoefficient": 1,
+          "maximumInterval": "0.001s"
+        },
+        "useWorkflowBuildId": true
+      }
+    },
+    {
+      "eventId": "12",
+      "eventTime": "2026-05-20T20:23:30.288608574Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "taskId": "1048620",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "11",
+        "identity": "325251@fedora@",
+        "requestId": "53ec51d2-518c-46bd-9f90-aebe697b276e",
+        "attempt": 1,
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        }
+      }
+    },
+    {
+      "eventId": "13",
+      "eventTime": "2026-05-20T20:23:30.291903037Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_FAILED",
+      "taskId": "1048621",
+      "activityTaskFailedEventAttributes": {
+        "failure": {
+          "message": "long path failed",
+          "source": "GoSDK",
+          "applicationFailureInfo": {
+            "type": "LongPathError",
+            "nonRetryable": true
+          }
+        },
+        "scheduledEventId": "11",
+        "startedEventId": "12",
+        "identity": "325251@fedora@",
+        "retryState": "RETRY_STATE_NON_RETRYABLE_FAILURE"
+      }
+    },
+    {
+      "eventId": "14",
+      "eventTime": "2026-05-20T20:23:30.291939913Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "taskId": "1048622",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "fedora:ac0033e0-09d8-4271-af66-8638c92f6ff0",
+          "kind": "TASK_QUEUE_KIND_STICKY",
+          "normalName": "replaysuite-shared"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "15",
+      "eventTime": "2026-05-20T20:23:30.293881838Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "taskId": "1048626",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "325251@fedora@",
+        "requestId": "7d97c7a1-e7e8-42a1-8409-dbb1be3947de",
+        "historySizeBytes": "1730",
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        }
+      }
+    },
+    {
+      "eventId": "16",
+      "eventTime": "2026-05-20T20:23:30.296874658Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "taskId": "1048630",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "14",
+        "startedEventId": "15",
+        "identity": "325251@fedora@",
+        "workerVersion": {
+          "buildId": "3fa7ef76ea858b42b1265d597e3d241d"
+        },
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "17",
+      "eventTime": "2026-05-20T20:23:30.296931020Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_FAILED",
+      "taskId": "1048631",
+      "workflowExecutionFailedEventAttributes": {
+        "failure": {
+          "message": "activity error",
+          "source": "GoSDK",
+          "cause": {
+            "message": "long path failed",
+            "source": "GoSDK",
+            "applicationFailureInfo": {
+              "type": "LongPathError",
+              "nonRetryable": true
+            }
+          },
+          "activityFailureInfo": {
+            "scheduledEventId": "11",
+            "startedEventId": "12",
+            "identity": "325251@fedora@",
+            "activityType": {
+              "name": "LongPathActivity"
+            },
+            "activityId": "11",
+            "retryState": "RETRY_STATE_NON_RETRYABLE_FAILURE"
+          }
+        },
+        "retryState": "RETRY_STATE_RETRY_POLICY_NOT_SET",
+        "workflowTaskCompletedEventId": "16"
+      }
+    }
+  ]
+}
