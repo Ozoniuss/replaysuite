@@ -61,9 +61,19 @@ func (o *fastReplayOutbound) ExecuteActivity(
 }
 
 func (o *fastReplayOutbound) NewTimer(ctx workflow.Context, d time.Duration) workflow.Future {
+	// avoid recording an event if sending a non-positive duration, like the
+	// sdk does
+	if d <= 0 {
+		return o.Next.NewTimer(ctx, d)
+	}
 	return o.Next.NewTimer(ctx, shortRetryInterval)
 }
 
 func (o *fastReplayOutbound) Sleep(ctx workflow.Context, d time.Duration) error {
+	// avoid recording an event if sending a non-positive duration, like the
+	// sdk does
+	if d <= 0 {
+		return o.Next.Sleep(ctx, d)
+	}
 	return o.Next.Sleep(ctx, shortRetryInterval)
 }

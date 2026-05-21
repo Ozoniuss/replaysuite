@@ -19,6 +19,7 @@ func TestWorkflowTimerTestSuite(t *testing.T) {
 func (s *WorkflowTimerTestSuite) SetupSuite() {
 	// Register the timer workflow for replay tests.
 	s.RegisterWorkflowForReplay(WorkflowWithTimer)
+	s.RegisterWorkflowForReplay(WorkflowWithZeroTimer)
 	s.BaseTestSuite.SetupSuite()
 }
 
@@ -28,6 +29,11 @@ func (s *WorkflowTimerTestSuite) SetupTest() {
 
 func (s *WorkflowTimerTestSuite) Test_WorkflowWithTimer() {
 	s.env.ExecuteWorkflow(WorkflowWithTimer)
+	s.True(s.env.IsWorkflowCompleted())
+}
+
+func (s *WorkflowTimerTestSuite) Test_WorkflowWithZeroTimer() {
+	s.env.ExecuteWorkflow(WorkflowWithZeroTimer)
 	s.True(s.env.IsWorkflowCompleted())
 }
 
