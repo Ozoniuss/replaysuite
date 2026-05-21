@@ -34,6 +34,8 @@ You may still need `env.RegisterWorkflow(...)` for normal unit-test behavior, fo
 
 ## Supported SDK test-suite APIs
 
+The minimum version of the Go sdk required to use this suite is [v1.35.0](https://github.com/temporalio/sdk-go/releases/tag/v1.35.0) since it needs `RegisterDynamicWorkflow` and `RegisterDynamicActivity` to overwrite the activity and child workflow implementation using the mocked inputs and outputs.
+
 The replay wrapper currently supports the following SDK-style test functions:
 
 - `ExecuteWorkflow(...)`
