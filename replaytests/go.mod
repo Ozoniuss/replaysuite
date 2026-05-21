@@ -5,10 +5,13 @@ go 1.25.1
 require (
 	github.com/Ozoniuss/replaysuite v0.0.0
 	github.com/stretchr/testify v1.11.1
+	github.com/temporalio/samples-go v1.3.0
 	go.temporal.io/sdk v1.43.1
+	go.temporal.io/sdk/contrib/envconfig v1.0.1
 )
 
 require (
+	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
