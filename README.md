@@ -53,6 +53,6 @@ The replay wrapper currently supports the following SDK-style test functions:
 Some important limitations are intentional for now:
 
 - only `Return()` and `Once()` are implemented on the custom mock wrapper; other SDK mock-chain helpers are not implemented yet
-- anything that isn't mentioned, e.g. signals, queries, updates, Nexus, continue-as-new are not covered yet
+- anything that isn't mentioned, e.g. signals, queries, updates, Nexus, continue-as-new, heartbeats are not covered yet
 
 See `replaytests/` for runnable examples.
