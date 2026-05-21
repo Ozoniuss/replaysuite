@@ -16,7 +16,7 @@ func WorkflowWithTimer(ctx workflow.Context) error {
 	// _ = workflow.NewTimer(ctx, time.Second*0).Get(ctx, nil)
 	logger.Info("Timer fired")
 
-	logger.Info("QueryWorkflow completed")
+	logger.Info("WorkflowWithTimer completed")
 	return nil
 }
 
@@ -30,6 +30,6 @@ func WorkflowWithZeroTimer(ctx workflow.Context) error {
 	// _ = workflow.NewTimer(ctx, time.Second*1).Get(ctx, nil)
 	logger.Info("Timer fired")
 
-	logger.Info("QueryWorkflow completed")
+	logger.Info("WorkflowWithZeroTimer completed")
 	return nil
 }

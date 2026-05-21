@@ -36,8 +36,3 @@ func (s *WorkflowTimerTestSuite) Test_WorkflowWithZeroTimer() {
 	s.env.ExecuteWorkflow(WorkflowWithZeroTimer)
 	s.True(s.env.IsWorkflowCompleted())
 }
-
-/*
-Now define a comprehensive test suite that cover all branches of your workflow.
-This should give you enough histories for replay tests.
-*/
