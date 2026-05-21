@@ -22,7 +22,10 @@
 package replaysuite
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,8 +51,9 @@ import (
 )
 
 const (
-	defaultHistoriesDir = ".histories"
-	sharedTaskQueue     = "replaysuite-shared"
+	defaultHistoriesDir       = ".histories"
+	sharedTaskQueue           = "replaysuite-shared"
+	decodedPayloadDataJSONKey = "__replaysuite_decodedData"
 )
 
 // Suite is a drop-in replacement for embedding testsuite.WorkflowTestSuite
@@ -442,6 +446,15 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 			if err != nil {
 				return err
 			}
+			// payloads are base64 encoded which makes it less convenient to
+			// inspect the actual values in the history. This also records a
+			// new field in the history with the decoded value. The replayer
+			// discards unknown fields so it should be ok.
+			//https://github.com/temporalio/sdk-go/blob/35367242edb9e92be90825cd7653ab0046a660d1/internal/internal_worker.go#L2054
+			out, err = annotatePayloadData(out)
+			if err != nil {
+				return err
+			}
 			workflowDir := filepath.Join(dir, sanitize(workflowType))
 			if err := os.MkdirAll(workflowDir, 0o755); err != nil {
 				return err
@@ -454,5 +467,68 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 		if len(nextPageToken) == 0 {
 			return nil
 		}
+	}
+}
+
+func annotatePayloadData(raw []byte) ([]byte, error) {
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	annotatePayloadDataValue(value)
+	return json.MarshalIndent(value, "", "  ")
+}
+
+func annotatePayloadDataValue(value interface{}) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		if decoded, ok := decodePayloadData(v); ok {
+			v[decodedPayloadDataJSONKey] = decoded
+		}
+		for _, child := range v {
+			annotatePayloadDataValue(child)
+		}
+	case []interface{}:
+		for _, child := range v {
+			annotatePayloadDataValue(child)
+		}
+	}
+}
+
+func decodePayloadData(payload map[string]interface{}) (interface{}, bool) {
+	metadata, ok := payload["metadata"].(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	encodedEncoding, ok := metadata["encoding"].(string)
+	if !ok {
+		return nil, false
+	}
+	encodingBytes, err := base64.StdEncoding.DecodeString(encodedEncoding)
+	if err != nil {
+		return nil, false
+	}
+
+	switch string(encodingBytes) {
+	case "binary/null":
+		return nil, true
+	case "json/plain", "json/protobuf":
+		encodedData, ok := payload["data"].(string)
+		if !ok {
+			return nil, false
+		}
+		data, err := base64.StdEncoding.DecodeString(encodedData)
+		if err != nil {
+			return nil, false
+		}
+		var decoded interface{}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded); err != nil {
+			return nil, false
+		}
+		return decoded, true
+	default:
+		return nil, false
 	}
 }

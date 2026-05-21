@@ -1,6 +1,7 @@
 package replaysuite
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -123,5 +124,63 @@ func TestStubCallMatchesSupportsTestifyMatchers(t *testing.T) {
 	// Then
 	if !matches {
 		t.Fatal("stubCallMatches = false, want true")
+	}
+}
+
+func TestAnnotatePayloadData(t *testing.T) {
+	raw := []byte(`{
+		"events": [
+			{
+				"payloads": [
+					{
+						"metadata": {
+							"encoding": "anNvbi9wbGFpbg=="
+						},
+						"data": "InZhbHVlOjci"
+					},
+					{
+						"metadata": {
+							"encoding": "anNvbi9wbGFpbg=="
+						},
+						"data": "Nw=="
+					},
+					{
+						"metadata": {
+							"encoding": "YmluYXJ5L251bGw="
+						}
+					}
+				]
+			}
+		]
+	}`)
+
+	annotated, err := annotatePayloadData(raw)
+	if err != nil {
+		t.Fatalf("annotatePayloadData returned error: %v", err)
+	}
+
+	var decoded struct {
+		Events []struct {
+			Payloads []struct {
+				Data        string          `json:"data"`
+				DecodedData json.RawMessage `json:"__replaysuite_decodedData"`
+			} `json:"payloads"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(annotated, &decoded); err != nil {
+		t.Fatalf("annotated JSON did not unmarshal: %v", err)
+	}
+
+	if got := string(decoded.Events[0].Payloads[0].DecodedData); got != `"value:7"` {
+		t.Fatalf("first %s = %s, want %s", decodedPayloadDataJSONKey, got, `"value:7"`)
+	}
+	if got := string(decoded.Events[0].Payloads[1].DecodedData); got != `7` {
+		t.Fatalf("second %s = %s, want 7", decodedPayloadDataJSONKey, got)
+	}
+	if got := string(decoded.Events[0].Payloads[2].DecodedData); got != `null` {
+		t.Fatalf("third %s = %s, want null", decodedPayloadDataJSONKey, got)
+	}
+	if decoded.Events[0].Payloads[0].Data != "InZhbHVlOjci" {
+		t.Fatal("original payload data was not preserved")
 	}
 }
