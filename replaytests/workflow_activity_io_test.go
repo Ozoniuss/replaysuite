@@ -20,6 +20,7 @@ func TestWorkflowActivityIOTestSuite(t *testing.T) {
 func (s *WorkflowActivityIOTestSuite) SetupSuite() {
 	// Register the activity I/O workflow for replay tests.
 	s.RegisterWorkflowForReplay(WorkflowWithInputChangeActivity)
+	s.RegisterWorkflowForReplay(WorkflowWithAddedInputs)
 	s.BaseTestSuite.SetupSuite()
 }
 
@@ -33,6 +34,20 @@ func (s *WorkflowActivityIOTestSuite) Test_WorkflowWithActivityInputStringToInt(
 	s.env.OnActivity(InputChangeActivity, mock.Anything, 7).Return("value:7", nil)
 
 	s.env.ExecuteWorkflow(WorkflowWithInputChangeActivity)
+
+	s.True(s.env.IsWorkflowCompleted())
+	s.NoError(s.env.GetWorkflowError())
+	var result string
+	s.NoError(s.env.GetWorkflowResult(&result))
+	s.Equal("value:7", result)
+}
+
+func (s *WorkflowActivityIOTestSuite) Test_WorkflowWithAddedInputs_AddsANewParamInFront() {
+	s.env.OnActivity(AddedInputsActivity, mock.Anything, "number 6", 7).Return("value:7", nil)
+	// When changing the activity input from string to int, update the stub to:
+	// s.env.OnActivity(AddedInputsActivity, mock.Anything, 7).Return("value:7", nil)
+
+	s.env.ExecuteWorkflow(WorkflowWithAddedInputs)
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.NoError(s.env.GetWorkflowError())
