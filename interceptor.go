@@ -50,6 +50,9 @@ func (o *fastReplayOutbound) ExecuteActivity(
 	// This is intended. Testing an activity with an infinite retry
 	// policy and a forced failure on that activity is probably a
 	// wrong test.
+	//
+	// TODO: have a test for infinite retry policy to see what happens.
+	// Don't want to have the server running forever.
 	if opts.RetryPolicy == nil {
 		opts.RetryPolicy = &temporal.RetryPolicy{}
 	}
