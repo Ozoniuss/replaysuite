@@ -17,6 +17,17 @@ Steps to run this sample:
 go test -count=1 -v ./...
 ```
 
+To run a single suite, pass the suite's top-level test name to `-run`:
+```
+go test -count=1 -v . -run '^TestWorkflowTimerTestSuite$'
+```
+
+To run a single test inside a suite, include both the suite test name and the
+suite method subtest name:
+```
+go test -count=1 -v . -run '^TestWorkflowTimerTestSuite$/^Test_WorkflowWithTimer$'
+```
+
 Try deleting the `.histories` folder such that the first run has no histories.
 In this case it will simply generate the histories for each workflow under
 `replaytests/.histories/<workflow_type>/`.
@@ -25,6 +36,9 @@ In this case it will simply generate the histories for each workflow under
 ```
 go test -count=1 -v ./...
 ```
+Use the same `-run` filters from step 1 if you only want to rerun one suite or
+one test against its recorded histories.
+
 This time `SetupSuite` replays every history in `.histories/` against each
 workflow registered for replay before the unit tests run, then regenerates them.
 A passing run means the workflow is still compatible with the previously
