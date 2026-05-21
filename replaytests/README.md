@@ -1,12 +1,13 @@
 This sample demonstrates replay testing with the `replaysuite` test wrapper.
+It contains a few examples of workflows with generated histories and
+instructions on how to change them to fail the replay tests.
 
 Running the suite executes the regular workflow unit tests and, in addition,
 mirrors each test against a local dev server to record real event histories
 under `.histories/`. On the next run those recorded histories are replayed
-against the current workflow code, catching non-deterministic changes.
-
-`replaysuite` starts its own dev server, so no separate Temporal server is
-needed to run these tests.
+against the current workflow code, catching non-deterministic changes if the
+code has changed since the history was produced. The local server is fully
+managed by the test suite.
 
 Steps to run this sample:
 
@@ -15,23 +16,25 @@ Steps to run this sample:
 ```
 go test -count=1 -v ./...
 ```
-The first run has no histories yet, so it just runs the unit tests and writes
-one history file per test into `replaytests/.histories/Workflow/`.
+
+Try deleting the `.histories` folder such that the first run has no histories.
+In this case it will simply generate the histories for each workflow under
+`replaytests/.histories/<workflow_type>/`.
 
 2) Run it again:
 ```
 go test -count=1 -v ./...
 ```
-This time `SetupSuite` replays every history in `.histories/` against
-`Workflow` before the unit tests run, then regenerates them. A passing run
-means the workflow is still compatible with the previously recorded histories.
+This time `SetupSuite` replays every history in `.histories/` against each
+workflow registered for replay before the unit tests run, then regenerates them.
+A passing run means the workflow is still compatible with the previously
+recorded histories. If the run fails, the old history files are deleted.
 
 ## Seeing a replay failure
 
 1) Run `go test -count=1 -v ./...` once to generate histories.
-2) In `workflow.go`, uncomment the block marked
-   `// Uncomment this to fail the replay test.` — it adds an extra activity
-   call, changing the workflow's command sequence.
+2) In any test file, find the comment explaining how to change the workflow to
+   trigger a failure.
 3) Run `go test -count=1 -v ./...` again. The replay step in `SetupSuite` now
    fails with a non-determinism error, because the recorded histories no longer
    match the modified workflow, and the suite stops before any unit test runs.
