@@ -3,9 +3,9 @@ package replaytests
 import (
 	"testing"
 
+	"github.com/Ozoniuss/replaysuite"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"github.com/Ozoniuss/replaysuite"
 	"go.temporal.io/sdk/temporal"
 )
 

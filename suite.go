@@ -64,10 +64,6 @@ type Suite struct {
 	suite.Suite
 	testsuite.WorkflowTestSuite
 
-	// historiesDir is the directory the dumped JSON histories are written
-	// to. Defaults to "histories" if unset when SetupSuite runs.
-	historiesDir string
-
 	server   *testsuite.DevServer
 	client   client.Client
 	envCount int64
@@ -89,11 +85,36 @@ type Suite struct {
 
 	wfIDsMu sync.Mutex
 	wfIDs   []string // every workflowID launched on the mirror; consulted by dumpAllHistories
+
+	// options bundles user-configurable knobs. See SuiteOptions and
+	// SetOptions. Must be set before SetupSuite runs.
+	options SuiteOptions
+}
+
+// SuiteOptions holds the configurable options for the replay suite. See each
+// option for more details.
+type SuiteOptions struct {
+	// HistoriesDir is the directory that dumped JSON histories are written
+	// to on tear-down (and read from on SetupSuite for replay). If empty,
+	// defaults to ".histories".
+	HistoriesDir string
+
+	// RedactWorkerIdentity, when true, causes dumped histories to have the
+	// worker identity and sticky task queue name replaced with a generic
+	// placeholder. Useful when histories are committed to source control and
+	// the raw values (which embed the host name and a random per-run suffix)
+	// would otherwise produce noisy diffs across runs. Defaults to false.
+	RedactWorkerIdentity bool
+}
+
+// SetOptions configures the suite. Must be called before SetupSuite runs.
+func (s *Suite) SetOptions(opts SuiteOptions) {
+	s.options = opts
 }
 
 func (s *Suite) SetupSuite() {
-	if s.historiesDir == "" {
-		s.historiesDir = defaultHistoriesDir
+	if s.options.HistoriesDir == "" {
+		s.options.HistoriesDir = defaultHistoriesDir
 	}
 	for workflowType, workflowFn := range s.workflowsTypesToReplayTest {
 		if err := s.replayAndDeleteHistories(workflowType, workflowFn); err != nil {
@@ -112,8 +133,8 @@ func (s *Suite) TearDownSuite() {
 		s.worker.Stop()
 	}
 	var dumperr error
-	if s.client != nil && s.historiesDir != "" {
-		if err := dumpAllHistories(context.Background(), s.client, s.historiesDir, s.workflowsTypesToReplayTest); err != nil {
+	if s.client != nil && s.options.HistoriesDir != "" {
+		if err := dumpAllHistories(context.Background(), s.client, s.options.HistoriesDir, s.workflowsTypesToReplayTest); err != nil {
 			dumperr = err
 		}
 	}
@@ -208,11 +229,11 @@ func (s *Suite) replayAndDeleteHistories(
 	workflowType string,
 	workflowFn interface{},
 ) error {
-	if s.historiesDir == "" || workflowType == "" {
+	if s.options.HistoriesDir == "" || workflowType == "" {
 		return nil
 	}
 
-	dir := filepath.Join(s.historiesDir, sanitize(workflowType))
+	dir := filepath.Join(s.options.HistoriesDir, sanitize(workflowType))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
