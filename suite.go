@@ -134,7 +134,7 @@ func (s *Suite) TearDownSuite() {
 	}
 	var dumperr error
 	if s.client != nil && s.options.HistoriesDir != "" {
-		if err := dumpAllHistories(context.Background(), s.client, s.options.HistoriesDir, s.workflowsTypesToReplayTest); err != nil {
+		if err := dumpAllHistories(context.Background(), s.client, s.options.HistoriesDir, s.workflowsTypesToReplayTest, s.options.RedactWorkerIdentity); err != nil {
 			dumperr = err
 		}
 	}
@@ -433,7 +433,7 @@ func historyFileName(workflowID, runID string) string {
 // dynamic workflow handler — is skipped: those histories are not
 // representative of the real workflow implementation and are never replayed,
 // so writing them would only leave uncleaned files in dir.
-func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTypes map[string]interface{}) error {
+func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTypes map[string]interface{}, redactWorkerIdentity bool) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -454,6 +454,7 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 			if _, ok := replayTypes[workflowType]; !ok {
 				continue
 			}
+			// generate history events
 			hist := &historypb.History{}
 			iter := c.GetWorkflowHistory(ctx, wfID, runID, false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
 			for iter.HasNext() {
@@ -463,8 +464,15 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 				}
 				hist.Events = append(hist.Events, ev)
 			}
-			out, err := marshal.Marshal(hist)
+
+			// convert from pb to any since that makes applying certain history
+			// overrides much easier, see how below functions are implemented.
+			raw, err := marshal.Marshal(hist)
 			if err != nil {
+				return err
+			}
+			var value interface{}
+			if err := json.Unmarshal(raw, &value); err != nil {
 				return err
 			}
 			// payloads are base64 encoded which makes it less convenient to
@@ -472,7 +480,11 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 			// new field in the history with the decoded value. The replayer
 			// discards unknown fields so it should be ok.
 			//https://github.com/temporalio/sdk-go/blob/35367242edb9e92be90825cd7653ab0046a660d1/internal/internal_worker.go#L2054
-			out, err = annotatePayloadData(out)
+			annotatePayloadData(value)
+			if redactWorkerIdentity {
+				redactWorkerIdentityInHistory(value)
+			}
+			out, err := json.MarshalIndent(value, "", "  ")
 			if err != nil {
 				return err
 			}
@@ -491,27 +503,50 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 	}
 }
 
-func annotatePayloadData(raw []byte) ([]byte, error) {
-	var value interface{}
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, err
+// redactWorkerIdentityInHistory makes the worker identity in the history
+// anonymous. It finds all events that reference the worker either as an
+// identity or a sticky task queue.
+//
+// Note that because multiple protos in the history have an identity field,
+// this helper makes the change on the raw value rather than a history proto
+// object.
+func redactWorkerIdentityInHistory(value interface{}) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		if _, ok := v["identity"].(string); ok {
+			v["identity"] = "placeholder"
+		}
+		if kind, ok := v["kind"].(string); ok && kind == "TASK_QUEUE_KIND_STICKY" {
+			if name, ok := v["name"].(string); ok {
+				if idx := strings.LastIndex(name, ":"); idx >= 0 {
+					v["name"] = "placeholder" + name[idx:]
+				} else {
+					v["name"] = "placeholder"
+				}
+			}
+		}
+		for _, child := range v {
+			redactWorkerIdentityInHistory(child)
+		}
+	case []interface{}:
+		for _, child := range v {
+			redactWorkerIdentityInHistory(child)
+		}
 	}
-	annotatePayloadDataValue(value)
-	return json.MarshalIndent(value, "", "  ")
 }
 
-func annotatePayloadDataValue(value interface{}) {
+func annotatePayloadData(value interface{}) {
 	switch v := value.(type) {
 	case map[string]interface{}:
 		if decoded, ok := decodePayloadData(v); ok {
 			v[decodedPayloadDataJSONKey] = decoded
 		}
 		for _, child := range v {
-			annotatePayloadDataValue(child)
+			annotatePayloadData(child)
 		}
 	case []interface{}:
 		for _, child := range v {
-			annotatePayloadDataValue(child)
+			annotatePayloadData(child)
 		}
 	}
 }

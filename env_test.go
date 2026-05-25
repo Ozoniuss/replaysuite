@@ -154,9 +154,14 @@ func TestAnnotatePayloadData(t *testing.T) {
 		]
 	}`)
 
-	annotated, err := annotatePayloadData(raw)
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	annotatePayloadData(value)
+	annotated, err := json.Marshal(value)
 	if err != nil {
-		t.Fatalf("annotatePayloadData returned error: %v", err)
+		t.Fatalf("marshal annotated: %v", err)
 	}
 
 	var decoded struct {
