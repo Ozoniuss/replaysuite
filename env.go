@@ -182,7 +182,7 @@ func (e *Env) ExecuteWorkflow(workflowFn any, args ...any) {
 	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
 
 	if err := e.mirrorOnDevServer(workflowFn, args); err != nil {
-		e.suite.T().Logf("[replaysuite] dev-server mirror failed: %v", err)
+		e.suite.T().Fatalf("[replaysuite] dev-server mirror failed: %v", err)
 	}
 }
 
