@@ -31,7 +31,9 @@ func (s *WorkflowTestSuite) SetupSuite() {
 	// Note that replay tests run before actually spinning up a dev server, so
 	// you must register them before setting up the suite.
 	s.RegisterWorkflowForReplay(Workflow)
-	s.Suite.SetOptions(replaysuite.SuiteOptions{RedactWorkerIdentity: true})
+	s.SetOptions(replaysuite.SuiteOptions{RedactWorkerIdentity: true})
+
+	// Setup the underlying test suite.
 	s.Suite.SetupSuite()
 }
 
