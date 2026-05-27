@@ -121,7 +121,13 @@ func (s *Suite) SetupSuite() {
 			s.Require().NoErrorf(err, "replay histories for workflow %s", workflowType)
 		}
 	}
-	srv, err := testsuite.StartDevServer(context.Background(), testsuite.DevServerOptions{})
+	srv, err := testsuite.StartDevServer(context.Background(), testsuite.DevServerOptions{
+		// Without this option, the minimum duration of a timer or a retry seems
+		// to be capped at 1s.
+		ExtraArgs: []string{
+			"--dynamic-config-value", `history.timerProcessorMaxTimeShift="1ms"`,
+		},
+	})
 	s.T().Log("server started")
 	s.Require().NoError(err)
 	s.server = srv
