@@ -32,6 +32,11 @@ func (s *WorkflowTimerTestSuite) Test_WorkflowWithTimer() {
 	s.True(s.env.IsWorkflowCompleted())
 }
 
+func (s *WorkflowTimerTestSuite) Test_WorkflowWithMultipleTimers() {
+	s.env.ExecuteWorkflow(WorkflowWithMultipleTimers)
+	s.True(s.env.IsWorkflowCompleted())
+}
+
 func (s *WorkflowTimerTestSuite) Test_WorkflowWithZeroTimer() {
 	s.env.ExecuteWorkflow(WorkflowWithZeroTimer)
 	s.True(s.env.IsWorkflowCompleted())
