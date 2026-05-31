@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"go.temporal.io/sdk/activity"
@@ -30,7 +31,8 @@ import (
 type Env struct {
 	*testsuite.TestWorkflowEnvironment
 
-	suite    *Suite
+	suite    *WorkflowTestSuite
+	t        *testing.T
 	envIdx   int64
 	runCount int64
 
@@ -182,7 +184,7 @@ func (e *Env) ExecuteWorkflow(workflowFn any, args ...any) {
 	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
 
 	if err := e.mirrorOnDevServer(workflowFn, args); err != nil {
-		e.suite.T().Fatalf("[replaysuite] dev-server mirror failed: %v", err)
+		e.t.Fatalf("[replaysuite] dev-server mirror failed: %v", err)
 	}
 }
 
@@ -204,7 +206,7 @@ func (e *Env) mirrorOnDevServer(workflowFn any, args []any) error {
 	}
 
 	runIdx := atomic.AddInt64(&e.runCount, 1)
-	wfID := sanitize(fmt.Sprintf("replaysuite-env%d-%s-run%d", e.envIdx, e.suite.T().Name(), runIdx))
+	wfID := sanitize(fmt.Sprintf("replaysuite-env%d-%s-run%d", e.envIdx, e.t.Name(), runIdx))
 
 	e.suite.envsByWFID.Store(wfID, e)
 	defer e.suite.envsByWFID.Delete(wfID)

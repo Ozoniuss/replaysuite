@@ -19,12 +19,13 @@ func TestWorkflowWithActivityCustomRetryPolicyTestSuite(t *testing.T) {
 }
 
 func (s *WorkflowWithActivityCustomRetryPolicyTestSuite) SetupSuite() {
-	s.RegisterWorkflowForReplay(WorkflowWithActivityCustomRetryPolicy)
-	s.BaseTestSuite.SetupSuite()
+	s.Require().NoError(s.WorkflowTestSuite.Start(
+		replaysuite.WithReplayWorkflows(WorkflowWithActivityCustomRetryPolicy),
+	))
 }
 
 func (s *WorkflowWithActivityCustomRetryPolicyTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment()
+	s.env = s.NewDevServerEnvironment(s.T())
 }
 
 func (s *WorkflowWithActivityCustomRetryPolicyTestSuite) Test_WorkflowWithActivityCustomRetryPolicy() {

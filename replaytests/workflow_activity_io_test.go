@@ -18,14 +18,13 @@ func TestWorkflowActivityIOTestSuite(t *testing.T) {
 }
 
 func (s *WorkflowActivityIOTestSuite) SetupSuite() {
-	// Register the activity I/O workflow for replay tests.
-	s.RegisterWorkflowForReplay(WorkflowWithInputChangeActivity)
-	s.RegisterWorkflowForReplay(WorkflowWithAddedInputs)
-	s.BaseTestSuite.SetupSuite()
+	s.Require().NoError(s.WorkflowTestSuite.Start(
+		replaysuite.WithReplayWorkflows(WorkflowWithInputChangeActivity, WorkflowWithAddedInputs),
+	))
 }
 
 func (s *WorkflowActivityIOTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment()
+	s.env = s.NewDevServerEnvironment(s.T())
 }
 
 func (s *WorkflowActivityIOTestSuite) Test_WorkflowWithActivityInputStringToInt() {

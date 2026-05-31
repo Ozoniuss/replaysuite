@@ -18,12 +18,13 @@ func TestWorkflowActivityNameTestSuite(t *testing.T) {
 }
 
 func (s *WorkflowActivityNameTestSuite) SetupSuite() {
-	s.RegisterWorkflowForReplay(WorkflowWithActivityNameChange)
-	s.BaseTestSuite.SetupSuite()
+	s.Require().NoError(s.WorkflowTestSuite.Start(
+		replaysuite.WithReplayWorkflows(WorkflowWithActivityNameChange),
+	))
 }
 
 func (s *WorkflowActivityNameTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment()
+	s.env = s.NewDevServerEnvironment(s.T())
 }
 
 func (s *WorkflowActivityNameTestSuite) Test_WorkflowWithActivityNameChange() {

@@ -10,11 +10,12 @@ import (
 )
 
 type WorkflowTestSuite struct {
+	suite.Suite
 	// Import replay suite as a replacement for the test workflow suite. This
 	// will run the regular unit tests, but on top of that it will also emit
 	// event histories for each test, as well as do replay testing for each
 	// workflow that is registered for that.
-	replaysuite.Suite
+	replaysuite.WorkflowTestSuite
 	env *replaysuite.Env
 }
 
@@ -23,22 +24,18 @@ func TestWorkflowTestSuite(t *testing.T) {
 }
 
 func (s *WorkflowTestSuite) SetupSuite() {
-	// In Setup Suite, you must register the workflow for which you want to run
-	// replay tests on. The replay test suite will run these tests against all
-	// existing histories found in the .histories folder of the corresponding
-	// workflow.
-	//
-	// Note that replay tests run before actually spinning up a dev server, so
-	// you must register them before setting up the suite.
-	s.RegisterWorkflowForReplay(Workflow)
-	s.SetOptions(replaysuite.SuiteOptions{RedactWorkerIdentity: true})
+	s.Require().NoError(s.WorkflowTestSuite.Start(
+		replaysuite.WithReplayWorkflows(Workflow),
+		replaysuite.WithRedactWorkerIdentity(),
+	))
+}
 
-	// Setup the underlying test suite.
-	s.Suite.SetupSuite()
+func (s *WorkflowTestSuite) TearDownSuite() {
+	s.Require().NoError(s.WorkflowTestSuite.Stop())
 }
 
 func (s *WorkflowTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment()
+	s.env = s.NewDevServerEnvironment(s.T())
 	// ChildWorkflow is invoked by name via ExecuteChildWorkflow, so it must be
 	// registered explicitly (the parent Workflow auto-registers on execute).
 	s.env.RegisterWorkflow(ChildWorkflow)

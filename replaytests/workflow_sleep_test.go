@@ -17,14 +17,13 @@ func TestWorkflowSleepTestSuite(t *testing.T) {
 }
 
 func (s *WorkflowSleepTestSuite) SetupSuite() {
-	// Register the timer workflow for replay tests.
-	s.RegisterWorkflowForReplay(WorkflowWithSleep)
-	s.RegisterWorkflowForReplay(WorkflowWithZeroSleep)
-	s.BaseTestSuite.SetupSuite()
+	s.Require().NoError(s.WorkflowTestSuite.Start(
+		replaysuite.WithReplayWorkflows(WorkflowWithSleep, WorkflowWithZeroSleep),
+	))
 }
 
 func (s *WorkflowSleepTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment()
+	s.env = s.NewDevServerEnvironment(s.T())
 }
 
 func (s *WorkflowSleepTestSuite) Test_WorkflowWithSleep() {

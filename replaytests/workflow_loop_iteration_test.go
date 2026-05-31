@@ -18,12 +18,13 @@ func TestWorkflowLoopIterationTestSuite(t *testing.T) {
 }
 
 func (s *WorkflowLoopIterationTestSuite) SetupSuite() {
-	s.RegisterWorkflowForReplay(WorkflowWithLoopIterationChange)
-	s.BaseTestSuite.SetupSuite()
+	s.Require().NoError(s.WorkflowTestSuite.Start(
+		replaysuite.WithReplayWorkflows(WorkflowWithLoopIterationChange),
+	))
 }
 
 func (s *WorkflowLoopIterationTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment()
+	s.env = s.NewDevServerEnvironment(s.T())
 }
 
 func (s *WorkflowLoopIterationTestSuite) Test_WorkflowWithLoopIterationChange() {
