@@ -74,7 +74,9 @@ type WorkflowTestSuite struct {
 	workerCreateErr  error
 	workerStartErr   error
 	envsByWFID       sync.Map // workflowID -> *Env, consulted by the dynamic activity handler
-	workflowSet      sync.Map // workflow type name -> struct{}, dedupes RegisterWorkflow calls
+
+	workflowSetMu sync.Mutex
+	workflowSet   map[string]struct{} // workflow type name -> struct{}, dedupes RegisterWorkflow calls
 
 	wfIDsMu sync.Mutex
 	wfIDs   []string // every workflowID launched on the mirror; consulted by dumpAllHistories

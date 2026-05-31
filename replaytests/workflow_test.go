@@ -39,6 +39,7 @@ func newEnv() *replaysuite.Env {
 }
 
 func Test_Workflow_EmptyName(t *testing.T) {
+	t.Parallel()
 	env := newEnv()
 
 	env.ExecuteWorkflow(Workflow, "")
@@ -48,6 +49,7 @@ func Test_Workflow_EmptyName(t *testing.T) {
 }
 
 func Test_Workflow_LongBranch(t *testing.T) {
+	t.Parallel()
 	env := newEnv()
 	env.OnActivity(GreetActivity, mock.Anything, "Temporal").Return("Hello Temporal!", nil)
 	env.OnActivity(LongPathActivity, mock.Anything, "Hello Temporal!").Return("long-handled(Hello Temporal!)", nil)
@@ -64,6 +66,7 @@ func Test_Workflow_LongBranch(t *testing.T) {
 }
 
 func Test_Workflow_ShortBranch(t *testing.T) {
+	t.Parallel()
 	env := newEnv()
 	env.OnActivity(GreetActivity, mock.Anything, "Bo").Return("Hello Bo!", nil)
 	env.OnWorkflow(ChildWorkflow, mock.Anything, "Hello Bo!").Return("Hello Bo!", nil)
@@ -80,6 +83,7 @@ func Test_Workflow_ShortBranch(t *testing.T) {
 }
 
 func Test_Workflow_GreetActivityFails(t *testing.T) {
+	t.Parallel()
 	env := newEnv()
 	env.OnActivity(GreetActivity, mock.Anything, "Temporal").
 		Return("", temporal.NewNonRetryableApplicationError("greet failed", "GreetError", nil))
@@ -91,6 +95,7 @@ func Test_Workflow_GreetActivityFails(t *testing.T) {
 }
 
 func Test_Workflow_BranchActivityFails(t *testing.T) {
+	t.Parallel()
 	env := newEnv()
 	env.OnActivity(GreetActivity, mock.Anything, "Temporal").Return("Hello Temporal!", nil)
 	env.OnActivity(LongPathActivity, mock.Anything, "Hello Temporal!").
@@ -103,6 +108,7 @@ func Test_Workflow_BranchActivityFails(t *testing.T) {
 }
 
 func Test_Workflow_ChildWorkflowFails(t *testing.T) {
+	t.Parallel()
 	env := newEnv()
 	env.OnActivity(GreetActivity, mock.Anything, "Bo").Return("Hello Bo!", nil)
 	env.OnWorkflow(ChildWorkflow, mock.Anything, "Hello Bo!").
@@ -115,6 +121,7 @@ func Test_Workflow_ChildWorkflowFails(t *testing.T) {
 }
 
 func Test_Workflow_ParallelActivityFails(t *testing.T) {
+	t.Parallel()
 	env := newEnv()
 	env.OnActivity(GreetActivity, mock.Anything, "Temporal").Return("Hello Temporal!", nil)
 	env.OnActivity(LongPathActivity, mock.Anything, "Hello Temporal!").Return("long-handled(Hello Temporal!)", nil)

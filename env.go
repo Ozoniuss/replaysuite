@@ -234,10 +234,17 @@ func (e *Env) registerWorkflowOnShared(w any, opts workflow.RegisterOptions) (st
 	if err := e.suite.ensureWorkerCreated(); err != nil {
 		return workflowType, fmt.Errorf("create shared replay worker: %w", err)
 	}
-	if _, loaded := e.suite.workflowSet.LoadOrStore(workflowType, struct{}{}); loaded {
+	// make sure the workflow is registered before it is ever started
+	e.suite.workflowSetMu.Lock()
+	defer e.suite.workflowSetMu.Unlock()
+	if e.suite.workflowSet == nil {
+		e.suite.workflowSet = map[string]struct{}{}
+	}
+	if _, ok := e.suite.workflowSet[workflowType]; ok {
 		return workflowType, nil
 	}
 	e.suite.worker.RegisterWorkflowWithOptions(w, opts)
+	e.suite.workflowSet[workflowType] = struct{}{}
 	return workflowType, nil
 }
 
