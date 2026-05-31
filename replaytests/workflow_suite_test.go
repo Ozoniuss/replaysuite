@@ -7,7 +7,16 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/workflow"
 )
+
+func WorkflowForSuite(ctx workflow.Context, name string) (string, error) {
+	return Workflow(ctx, name)
+}
+
+func ChildWorkflowForSuite(ctx workflow.Context, name string) (string, error) {
+	return ChildWorkflow(ctx, name)
+}
 
 type WorkflowTestSuite struct {
 	suite.Suite
@@ -25,7 +34,7 @@ func TestWorkflowTestSuite(t *testing.T) {
 
 func (s *WorkflowTestSuite) SetupSuite() {
 	s.Require().NoError(s.WorkflowTestSuite.Start(
-		replaysuite.WithReplayWorkflows(Workflow),
+		replaysuite.WithReplayWorkflows(WorkflowForSuite),
 		replaysuite.WithRedactWorkerIdentity(),
 	))
 }
@@ -38,7 +47,7 @@ func (s *WorkflowTestSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
 	// ChildWorkflow is invoked by name via ExecuteChildWorkflow, so it must be
 	// registered explicitly (the parent Workflow auto-registers on execute).
-	s.env.RegisterWorkflow(ChildWorkflow)
+	s.env.RegisterWorkflow(ChildWorkflowForSuite)
 }
 
 /*
@@ -47,7 +56,7 @@ This should give you enough histories for replay tests.
 */
 
 func (s *WorkflowTestSuite) Test_Workflow_EmptyName() {
-	s.env.ExecuteWorkflow(Workflow, "")
+	s.env.ExecuteWorkflow(WorkflowForSuite, "")
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.Error(s.env.GetWorkflowError())
@@ -59,7 +68,7 @@ func (s *WorkflowTestSuite) Test_Workflow_LongBranch() {
 	s.env.OnActivity(UppercaseActivity, mock.Anything, "Hello Temporal!").Return("HELLO TEMPORAL!", nil)
 	s.env.OnActivity(ReverseActivity, mock.Anything, "Hello Temporal!").Return("!laropmeT olleH", nil)
 
-	s.env.ExecuteWorkflow(Workflow, "Temporal")
+	s.env.ExecuteWorkflow(WorkflowForSuite, "Temporal")
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.NoError(s.env.GetWorkflowError())
@@ -74,7 +83,7 @@ func (s *WorkflowTestSuite) Test_Workflow_ShortBranch() {
 	s.env.OnActivity(UppercaseActivity, mock.Anything, "Hello Bo!").Return("HELLO BO!", nil)
 	s.env.OnActivity(ReverseActivity, mock.Anything, "Hello Bo!").Return("!oB olleH", nil)
 
-	s.env.ExecuteWorkflow(Workflow, "Bo")
+	s.env.ExecuteWorkflow(WorkflowForSuite, "Bo")
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.NoError(s.env.GetWorkflowError())
@@ -88,7 +97,7 @@ func (s *WorkflowTestSuite) Test_Workflow_GreetActivityFails() {
 	s.env.OnActivity(GreetActivity, mock.Anything, "Temporal").
 		Return("", temporal.NewNonRetryableApplicationError("greet failed", "GreetError", nil))
 
-	s.env.ExecuteWorkflow(Workflow, "Temporal")
+	s.env.ExecuteWorkflow(WorkflowForSuite, "Temporal")
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.ErrorContains(s.env.GetWorkflowError(), "greet failed")
@@ -99,7 +108,7 @@ func (s *WorkflowTestSuite) Test_Workflow_BranchActivityFails() {
 	s.env.OnActivity(LongPathActivity, mock.Anything, "Hello Temporal!").
 		Return("", temporal.NewNonRetryableApplicationError("long path failed", "LongPathError", nil))
 
-	s.env.ExecuteWorkflow(Workflow, "Temporal")
+	s.env.ExecuteWorkflow(WorkflowForSuite, "Temporal")
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.ErrorContains(s.env.GetWorkflowError(), "long path failed")
@@ -110,7 +119,7 @@ func (s *WorkflowTestSuite) Test_Workflow_ChildWorkflowFails() {
 	s.env.OnWorkflow(ChildWorkflow, mock.Anything, "Hello Bo!").
 		Return("", temporal.NewNonRetryableApplicationError("child failed", "ChildError", nil))
 
-	s.env.ExecuteWorkflow(Workflow, "Bo")
+	s.env.ExecuteWorkflow(WorkflowForSuite, "Bo")
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.ErrorContains(s.env.GetWorkflowError(), "child failed")
@@ -123,7 +132,7 @@ func (s *WorkflowTestSuite) Test_Workflow_ParallelActivityFails() {
 		Return("", temporal.NewNonRetryableApplicationError("uppercase failed", "UppercaseError", nil))
 	s.env.OnActivity(ReverseActivity, mock.Anything, "Hello Temporal!").Return("!laropmeT olleH", nil)
 
-	s.env.ExecuteWorkflow(Workflow, "Temporal")
+	s.env.ExecuteWorkflow(WorkflowForSuite, "Temporal")
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.ErrorContains(s.env.GetWorkflowError(), "uppercase failed")
