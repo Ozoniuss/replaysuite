@@ -35,7 +35,7 @@ func (s *WorkflowTestSuite) TearDownSuite() {
 }
 
 func (s *WorkflowTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment(s.T())
+	s.env = s.NewTestWorkflowEnvironment()
 	// ChildWorkflow is invoked by name via ExecuteChildWorkflow, so it must be
 	// registered explicitly (the parent Workflow auto-registers on execute).
 	s.env.RegisterWorkflow(ChildWorkflow)

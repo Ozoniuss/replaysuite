@@ -24,7 +24,7 @@ func (s *WorkflowLoopIterationTestSuite) SetupSuite() {
 }
 
 func (s *WorkflowLoopIterationTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment(s.T())
+	s.env = s.NewTestWorkflowEnvironment()
 }
 
 func (s *WorkflowLoopIterationTestSuite) Test_WorkflowWithLoopIterationChange() {

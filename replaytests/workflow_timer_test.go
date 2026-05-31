@@ -23,7 +23,7 @@ func (s *WorkflowTimerTestSuite) SetupSuite() {
 }
 
 func (s *WorkflowTimerTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment(s.T())
+	s.env = s.NewTestWorkflowEnvironment()
 }
 
 func (s *WorkflowTimerTestSuite) Test_WorkflowWithTimer() {

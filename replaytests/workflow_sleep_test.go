@@ -23,7 +23,7 @@ func (s *WorkflowSleepTestSuite) SetupSuite() {
 }
 
 func (s *WorkflowSleepTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment(s.T())
+	s.env = s.NewTestWorkflowEnvironment()
 }
 
 func (s *WorkflowSleepTestSuite) Test_WorkflowWithSleep() {

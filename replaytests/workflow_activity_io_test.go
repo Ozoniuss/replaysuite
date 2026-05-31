@@ -24,7 +24,7 @@ func (s *WorkflowActivityIOTestSuite) SetupSuite() {
 }
 
 func (s *WorkflowActivityIOTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment(s.T())
+	s.env = s.NewTestWorkflowEnvironment()
 }
 
 func (s *WorkflowActivityIOTestSuite) Test_WorkflowWithActivityInputStringToInt() {

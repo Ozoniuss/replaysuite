@@ -24,7 +24,7 @@ func (s *WorkflowActivityNameTestSuite) SetupSuite() {
 }
 
 func (s *WorkflowActivityNameTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment(s.T())
+	s.env = s.NewTestWorkflowEnvironment()
 }
 
 func (s *WorkflowActivityNameTestSuite) Test_WorkflowWithActivityNameChange() {

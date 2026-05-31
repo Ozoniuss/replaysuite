@@ -22,7 +22,7 @@ There are two main API differences from a normal `testsuite.WorkflowTestSuite`
 setup:
 
 - Embed `replaysuite.WorkflowTestSuite` instead of `testsuite.WorkflowTestSuite`. It is a drop-in for the SDK test suite, but also owns the dev server, shared worker, history replay step, and history dumping step.
-- Use `s.NewDevServerEnvironment(s.T())` in `SetupTest` instead of `s.NewTestWorkflowEnvironment()`. The returned environment wraps a regular `*testsuite.TestWorkflowEnvironment`, so existing unit-test assertions and mocks still run there. When `ExecuteWorkflow` is called, the wrapper first runs the normal unit test and then mirrors the same workflow execution to the local dev server to generate a real history.
+- `s.NewTestWorkflowEnvironment()` in `SetupTest` now returns a wrapping `*replaysuite.Env`. The returned environment wraps a regular `*testsuite.TestWorkflowEnvironment`, so existing unit-test assertions and mocks still run there. When `ExecuteWorkflow` is called, the wrapper first runs the normal unit test and then mirrors the same workflow execution to the local dev server to generate a real history.
 
 The replay suite uses `WithReplayWorkflows` (passed to `Start`) to:
 

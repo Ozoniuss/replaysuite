@@ -25,7 +25,7 @@ func (s *WorkflowWithActivityCustomRetryPolicyTestSuite) SetupSuite() {
 }
 
 func (s *WorkflowWithActivityCustomRetryPolicyTestSuite) SetupTest() {
-	s.env = s.NewDevServerEnvironment(s.T())
+	s.env = s.NewTestWorkflowEnvironment()
 }
 
 func (s *WorkflowWithActivityCustomRetryPolicyTestSuite) Test_WorkflowWithActivityCustomRetryPolicy() {

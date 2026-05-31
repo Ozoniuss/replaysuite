@@ -34,7 +34,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"testing"
 
 	"github.com/stretchr/testify/mock"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -195,17 +194,18 @@ func (s *WorkflowTestSuite) Stop() error {
 	return dumperr
 }
 
-// NewDevServerEnvironment returns a wrapping environment. The returned
+// NewTestWorkflowEnvironment returns a wrapping environment. The returned
 // *Env delegates every method to a fresh *testsuite.TestWorkflowEnvironment
 // (so unit-test semantics are preserved) and additionally mirrors the
 // scenario against the suite's shared dev-server worker to produce a real
-// history. The passed t is used to fail the test on mirror errors.
-func (s *WorkflowTestSuite) NewDevServerEnvironment(t *testing.T) *Env {
+// history.
+//
+// Shadows the embedded testsuite.WorkflowTestSuite.NewTestWorkflowEnvironment.
+func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *Env {
 	idx := atomic.AddInt64(&s.envCount, 1)
 	return &Env{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
 		suite:                   s,
-		t:                       t,
 		envIdx:                  idx,
 		stubs:                   map[string][]stubCall{},
 		stubFnRef:               map[string]interface{}{},
