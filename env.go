@@ -89,7 +89,7 @@ func (m *MockCallWrapper) Once() *MockCallWrapper {
 func (e *Env) OnActivity(activityFn any, args ...any) *MockCallWrapper {
 
 	// TODO: do we need to handle method registration?
-	name, _ := activityFunctionName(activityFn)
+	name, _ := getFunctionName(activityFn)
 
 	// First arg is the context placeholder (mock.Anything by convention).
 	// Strip it for our matcher; the dev-server stub never receives it as
@@ -121,7 +121,7 @@ func (e *Env) OnActivity(activityFn any, args ...any) *MockCallWrapper {
 // by convention) — here it stands in for the child's workflow.Context — and
 // is stripped before matching against runtime args.
 func (e *Env) OnWorkflow(workflowFn any, args ...any) *MockCallWrapper {
-	name, _ := activityFunctionName(workflowFn)
+	name, _ := getFunctionName(workflowFn)
 
 	matchArgs := []any{}
 	if len(args) > 1 {
@@ -199,7 +199,7 @@ func (e *Env) mirrorOnDevServer(workflowFn any, args []any) error {
 	}); err != nil {
 		return err
 	}
-	if err := e.suite.startWorkerOnce(); err != nil {
+	if err := e.suite.startSharedWorker(); err != nil {
 		return err
 	}
 
@@ -231,9 +231,7 @@ func (e *Env) registerWorkflowOnShared(w any, opts workflow.RegisterOptions) (st
 		return workflowType, nil
 	}
 
-	if err := e.suite.ensureWorkerCreated(); err != nil {
-		return workflowType, fmt.Errorf("create shared replay worker: %w", err)
-	}
+	e.suite.ensureWorkerCreated()
 	// make sure the workflow is registered before it is ever started
 	e.suite.workflowSetMu.Lock()
 	defer e.suite.workflowSetMu.Unlock()
@@ -252,13 +250,13 @@ func workflowTypeName(w any, opts workflow.RegisterOptions) string {
 	if opts.Name != "" {
 		return opts.Name
 	}
-	name, _ := activityFunctionName(w)
+	name, _ := getFunctionName(w)
 	return name
 }
 
-// activityFunctionName is a straight copy from what Go SDK does.
+// getFunctionName is a straight copy from what Go SDK does.
 // https://github.com/temporalio/sdk-go/blob/35367242edb9e92be90825cd7653ab0046a660d1/internal/internal_worker.go#L2565
-func activityFunctionName(i any) (name string, isMethod bool) {
+func getFunctionName(i any) (name string, isMethod bool) {
 	if fullName, ok := i.(string); ok {
 		return fullName, false
 	}

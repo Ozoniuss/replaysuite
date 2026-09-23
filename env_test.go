@@ -27,7 +27,7 @@ func TestActivityFunctionName(t *testing.T) {
 		const activityName = "CustomActivityName"
 
 		// When
-		name, isMethod := activityFunctionName(activityName)
+		name, isMethod := getFunctionName(activityName)
 
 		// Then
 		if name != activityName {
@@ -43,7 +43,7 @@ func TestActivityFunctionName(t *testing.T) {
 		activityFn := plainActivityForNameTest
 
 		// When
-		name, isMethod := activityFunctionName(activityFn)
+		name, isMethod := getFunctionName(activityFn)
 
 		// Then
 		if name != "plainActivityForNameTest" {
@@ -59,7 +59,7 @@ func TestActivityFunctionName(t *testing.T) {
 		activities := activityFunctionNameTestActivities{}
 
 		// When
-		name, isMethod := activityFunctionName(activities.ValueReceiverActivity)
+		name, isMethod := getFunctionName(activities.ValueReceiverActivity)
 
 		// Then
 		if name != "ValueReceiverActivity" {
@@ -75,7 +75,7 @@ func TestActivityFunctionName(t *testing.T) {
 		activities := &activityFunctionNameTestActivities{}
 
 		// When
-		name, isMethod := activityFunctionName(activities.PointerReceiverActivity)
+		name, isMethod := getFunctionName(activities.PointerReceiverActivity)
 
 		// Then
 		if name != "PointerReceiverActivity" {
@@ -91,7 +91,7 @@ func TestActivityFunctionName(t *testing.T) {
 		var activities *activityFunctionNameTestActivities
 
 		// When
-		name, isMethod := activityFunctionName(activities.PointerReceiverActivity)
+		name, isMethod := getFunctionName(activities.PointerReceiverActivity)
 
 		// Then
 		if name != "PointerReceiverActivity" {

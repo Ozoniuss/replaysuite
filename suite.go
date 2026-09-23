@@ -1,24 +1,3 @@
-// Package replaysuite provides a drop-in wrapper around
-// testsuite.WorkflowTestSuite that, in addition to the normal in-process
-// unit-test execution, mirrors each workflow run against a real dev
-// server so that real event histories are produced for replay testing.
-//
-// A workflow-outbound interceptor on the mirror worker clamps all
-// retry-policy intervals and timer durations to 1ms, and forces every
-// activity onto a single shared task queue. Activity options aren't
-// checked for non-determinism on replay, so rewriting them is safe and
-// removes the wall-clock cost of retry backoff and workflow timers.
-//
-// Existing tests written against *testsuite.TestWorkflowEnvironment keep
-// working as-is — the wrapper delegates every call to a real test
-// environment, so virtual time, mocked activities and child workflows,
-// assertions, signals, and result/error inspection behave exactly as
-// before. The dev-server mirror is purely additive.
-//
-// Per-test semantics are preserved: each test still creates a fresh
-// *testsuite.TestWorkflowEnvironment via NewDevServerEnvironment. The
-// expensive bits — dev server, worker, dynamic activity handler — are
-// shared at the suite level so the per-test overhead stays small.
 package replaysuite
 
 import (
@@ -56,8 +35,10 @@ const (
 )
 
 // WorkflowTestSuite is a drop-in replacement for testsuite.WorkflowTestSuite.
-// It additionally owns a dev server (one per Start/Stop cycle) and dumps every
-// workflow history it observes to the configured histories directory on Stop.
+// In addition to the normal in-process  unit-test execution, each workflow runs
+// against a real dev which produces event histories that can be used for replay
+// testing. Existing tests written against *testsuite.TestWorkflowEnvironment keep
+// working as-is.
 type WorkflowTestSuite struct {
 	testsuite.WorkflowTestSuite
 
@@ -71,7 +52,6 @@ type WorkflowTestSuite struct {
 	workerCreateOnce sync.Once
 	workerStartOnce  sync.Once
 	worker           worker.Worker
-	workerCreateErr  error
 	workerStartErr   error
 	envsByWFID       sync.Map // workflowID -> *Env, consulted by the dynamic activity handler
 
@@ -85,9 +65,8 @@ type WorkflowTestSuite struct {
 	started bool
 }
 
-// config holds the resolved suite configuration. Populated by Option values
-// passed to Start.
 type config struct {
+	// TODO: add support for any type of FS.
 	historiesDir         string
 	redactWorkerIdentity bool
 	skipReplayTest       bool
@@ -97,7 +76,6 @@ type config struct {
 	replayWorkflows map[string]interface{}
 }
 
-// Option configures the suite. Pass Options to Start.
 type Option func(*config)
 
 // WithHistoriesDir overrides the directory used to read existing histories at
@@ -107,27 +85,27 @@ func WithHistoriesDir(dir string) Option {
 }
 
 // WithRedactWorkerIdentity replaces the worker identity and sticky task queue
-// name in dumped histories with a generic placeholder. Useful when histories
-// are committed to source control.
+// name in dumped histories with a generic placeholder.
 func WithRedactWorkerIdentity() Option {
 	return func(c *config) { c.redactWorkerIdentity = true }
 }
 
 // WithSkipReplayTest skips replaying existing histories against the current
-// workflow implementations at Start. New histories are still dumped on Stop.
+// workflow implementations. New histories are still generated in the target
+// location.
 func WithSkipReplayTest() Option {
 	return func(c *config) { c.skipReplayTest = true }
 }
 
-// WithReplayWorkflows registers workflow functions for replay testing and
-// history dumping. Only workflows registered here are replayed and dumped.
+// WithReplayWorkflows registers workflow functions for replay testing.
+// Only workflows registered here are replayed and dumped.
 func WithReplayWorkflows(fns ...interface{}) Option {
 	return func(c *config) {
 		if c.replayWorkflows == nil {
 			c.replayWorkflows = make(map[string]interface{})
 		}
 		for _, fn := range fns {
-			name, _ := activityFunctionName(fn)
+			name, _ := getFunctionName(fn)
 			c.replayWorkflows[name] = fn
 		}
 	}
@@ -135,7 +113,7 @@ func WithReplayWorkflows(fns ...interface{}) Option {
 
 // Start replays existing histories (unless WithSkipReplayTest is set), then
 // starts the dev server. Must be called before any test creates an Env via
-// NewDevServerEnvironment, and must not be called twice.
+// NewTestWorkflowEnvironment, and must not be called twice.
 func (s *WorkflowTestSuite) Start(opts ...Option) error {
 	if s.started {
 		return fmt.Errorf("replaysuite: Start called twice")
@@ -196,37 +174,34 @@ func (s *WorkflowTestSuite) Stop() error {
 	return dumperr
 }
 
-// NewTestWorkflowEnvironment returns a wrapping environment. The returned
-// *Env delegates every method to a fresh *testsuite.TestWorkflowEnvironment
-// (so unit-test semantics are preserved) and additionally mirrors the
-// scenario against the suite's shared dev-server worker to produce a real
-// history.
-//
-// Shadows the embedded testsuite.WorkflowTestSuite.NewTestWorkflowEnvironment.
+// NewTestWorkflowEnvironment returns a wrapper environment for
+// *testsuite.TestWorkflowEnvironment that allows replay testing on top
+// of the existing workflow tests.
 func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *Env {
+	// needed to support parallel tests
 	idx := atomic.AddInt64(&s.envCount, 1)
 	return &Env{
 		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
 		suite:                   s,
 		envIdx:                  idx,
 		stubs:                   map[string][]stubCall{},
-		stubFnRef:               map[string]interface{}{},
+		stubFnRef:               map[string]any{},
 		workflowStubs:           map[string][]stubCall{},
-		workflowStubFnRef:       map[string]interface{}{},
+		workflowStubFnRef:       map[string]any{},
 	}
 }
 
-// ensureWorkerCreated lazily creates the shared worker. The worker registers a
-// dynamic activity handler that routes every activity call to the right Env's
-// stub table via the workflow ID, a dynamic workflow handler that does the
-// same for child workflows via the parent workflow ID, and a workflow outbound
-// interceptor that clamps retry-policy intervals and timer durations to 1ms
-// and rewrites every activity's task queue to sharedTaskQueue.
-func (s *WorkflowTestSuite) ensureWorkerCreated() error {
+func (s *WorkflowTestSuite) ensureWorkerCreated() {
 	s.workerCreateOnce.Do(func() {
 		s.worker = worker.New(s.client, sharedTaskQueue, worker.Options{
 			Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{}},
 		})
+
+		// register empty activities and workflow types on the worker, which
+		// still create histories based on mocked payloads but don't actually
+		// execute anything.
+		//
+		// see https://docs.temporal.io/dynamic-handler
 
 		s.worker.RegisterDynamicActivity(
 			func(ctx context.Context, payloads converter.EncodedValues) (interface{}, error) {
@@ -242,16 +217,13 @@ func (s *WorkflowTestSuite) ensureWorkerCreated() error {
 			workflow.DynamicRegisterOptions{},
 		)
 	})
-	return s.workerCreateErr
 }
 
-// startWorkerOnce lazily starts the shared worker. Workflows should be
-// registered before this is called so the worker does not poll a workflow task
-// before its type is available in the registry.
-func (s *WorkflowTestSuite) startWorkerOnce() error {
-	if err := s.ensureWorkerCreated(); err != nil {
-		return err
-	}
+// note that workflows must be registered to the shared worker in the
+// wrapping environment before starting the worker so it doesn't poll
+// tasks for workflows it doesn't know about yet.ß
+func (s *WorkflowTestSuite) startSharedWorker() error {
+	s.ensureWorkerCreated()
 
 	s.workerStartOnce.Do(func() {
 		if err := s.worker.Start(); err != nil {
@@ -305,10 +277,8 @@ func (s *WorkflowTestSuite) replayAndDeleteHistories(
 	return nil
 }
 
-// dynamicActivityHandler is the catch-all activity registered on the
-// shared worker. It looks up the current Env by workflow ID, decodes the
-// activity payload using the type info captured at OnActivity time, and
-// returns the matching stub's recorded result.
+// dynamicActivityHandler infers what to return for an activity based on
+// mocked outputs.
 func (s *WorkflowTestSuite) dynamicActivityHandler(ctx context.Context, payloads converter.EncodedValues) (interface{}, error) {
 	info := activity.GetInfo(ctx)
 	wfID := info.WorkflowExecution.ID
