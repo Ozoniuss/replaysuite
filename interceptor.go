@@ -42,7 +42,7 @@ type fastReplayOutbound struct {
 }
 
 func (o *fastReplayOutbound) ExecuteActivity(
-	ctx workflow.Context, activityType string, args ...interface{},
+	ctx workflow.Context, activityType string, args ...any,
 ) workflow.Future {
 	opts := workflow.GetActivityOptions(ctx)
 	// Overwrite the task queue to the one used by the replay worker.

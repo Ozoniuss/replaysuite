@@ -106,14 +106,14 @@ func TestActivityFunctionName(t *testing.T) {
 func TestStubCallMatchesSupportsTestifyMatchers(t *testing.T) {
 	// Given
 	call := stubCall{
-		expectedArgs: []interface{}{
+		expectedArgs: []any{
 			mock.Anything,
 			mock.MatchedBy(func(input *activityFunctionNameTestActivities) bool {
 				return input != nil
 			}),
 		},
 	}
-	decoded := []interface{}{
+	decoded := []any{
 		"ignored",
 		&activityFunctionNameTestActivities{},
 	}
@@ -154,7 +154,7 @@ func TestAnnotatePayloadData(t *testing.T) {
 		]
 	}`)
 
-	var value interface{}
+	var value any
 	if err := json.Unmarshal(raw, &value); err != nil {
 		t.Fatalf("unmarshal raw: %v", err)
 	}

@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
@@ -125,6 +127,119 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	// activity policy). Figure out what to do there.
 	_ = run.Get(ctx, nil)
 	return nil
+}
+
+func (env *TestWorkflowEnvironment) dynamicActivityHandler(ctx context.Context, payloads converter.EncodedValues) (any, error) {
+	info := activity.GetInfo(ctx)
+	wfID := info.WorkflowExecution.ID
+	actName := info.ActivityType.Name
+
+	stubFn, ok := env.activityStubFnRef[actName]
+	if !ok {
+		return nil, fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID)
+	}
+
+	decoded, err := decodePayloadsViaFnType(payloads, stubFn)
+	if err != nil {
+		return nil, fmt.Errorf("decode payloads for %s: %w", actName, err)
+	}
+
+	for _, c := range env.activityStubs[actName] {
+		if stubCallMatches(c, decoded) {
+			return extractReturn(c.returns)
+		}
+	}
+	return nil, fmt.Errorf("replaysuite: no stub matched activity %s args=%v", actName, decoded)
+}
+
+func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context, payloads converter.EncodedValues) (any, error) {
+	info := workflow.GetInfo(ctx)
+	wfType := info.WorkflowType.Name
+
+	parent := info.ParentWorkflowExecution
+	if parent == nil {
+		return nil, fmt.Errorf("replaysuite: workflow %s has no parent; only mocked child workflows are served by the dynamic handler", wfType)
+	}
+
+	stubFn, ok := env.workflowStubFnRef[wfType]
+	if !ok {
+		return nil, fmt.Errorf("replaysuite: no OnWorkflow stub for child workflow %s in workflow %s", wfType, parent.ID)
+	}
+
+	decoded, err := decodePayloadsViaFnType(payloads, stubFn)
+	if err != nil {
+		return nil, fmt.Errorf("decode payloads for child workflow %s: %w", wfType, err)
+	}
+
+	for _, c := range env.workflowStubs[wfType] {
+		if stubCallMatches(c, decoded) {
+			return extractReturn(c.returns)
+		}
+	}
+	return nil, fmt.Errorf("replaysuite: no OnWorkflow stub matched child workflow %s args=%v", wfType, decoded)
+}
+
+func decodePayloadsViaFnType(payloads converter.EncodedValues, fn any) ([]any, error) {
+	fnType := reflect.TypeOf(fn)
+	if fnType.Kind() != reflect.Func {
+		return nil, fmt.Errorf("not a function")
+	}
+	ctxType := reflect.TypeFor[context.Context]()
+	wfCtxType := reflect.TypeFor[workflow.Context]()
+
+	startIdx := 0
+	if fnType.NumIn() > 0 {
+		if first := fnType.In(0); first.Implements(ctxType) || first.Implements(wfCtxType) {
+			startIdx = 1
+		}
+	}
+	argCount := fnType.NumIn() - startIdx
+	ptrs := make([]any, argCount)
+	values := make([]reflect.Value, argCount)
+	for i := range argCount {
+		t := fnType.In(i + startIdx)
+		v := reflect.New(t)
+		ptrs[i] = v.Interface()
+		values[i] = v
+	}
+	if argCount > 0 {
+		if err := payloads.Get(ptrs...); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]any, argCount)
+	for i, v := range values {
+		out[i] = v.Elem().Interface()
+	}
+	return out, nil
+}
+
+func extractReturn(rets []any) (any, error) {
+	switch len(rets) {
+	case 0:
+		return nil, nil
+	case 1:
+		if rets[0] == nil {
+			return nil, nil
+		}
+		if e, ok := rets[0].(error); ok {
+			return nil, e
+		}
+		return rets[0], nil
+	default:
+		var err error
+		if rets[1] != nil {
+			if e, ok := rets[1].(error); ok {
+				err = e
+			}
+		}
+		return rets[0], err
+	}
+}
+
+func stubCallMatches(c stubCall, decoded []any) bool {
+	_, differences := mock.Arguments(c.expectedArgs).Diff(decoded)
+	return differences == 0
 }
 
 type stubCall struct {

@@ -8,20 +8,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 
-	"github.com/stretchr/testify/mock"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
-	"go.temporal.io/sdk/workflow"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -64,7 +59,7 @@ type config struct {
 	// replayWorkflows maps workflow type name to workflow function. Workflows
 	// listed here are replayed against existing histories at Start and have
 	// their mirrored executions dumped at Stop.
-	replayWorkflows map[string]interface{}
+	replayWorkflows map[string]any
 }
 
 type Option func(*config)
@@ -90,10 +85,10 @@ func WithSkipReplayTest() Option {
 
 // WithReplayWorkflows registers workflow functions for replay testing.
 // Only workflows registered here are replayed and dumped.
-func WithReplayWorkflows(fns ...interface{}) Option {
+func WithReplayWorkflows(fns ...any) Option {
 	return func(c *config) {
 		if c.replayWorkflows == nil {
-			c.replayWorkflows = make(map[string]interface{})
+			c.replayWorkflows = make(map[string]any)
 		}
 		for _, fn := range fns {
 			name, _ := getFunctionName(fn)
@@ -165,7 +160,7 @@ func (s *WorkflowTestSuite) Stop() error {
 
 func (s *WorkflowTestSuite) replayAndDeleteHistories(
 	workflowType string,
-	workflowFn interface{},
+	workflowFn any,
 ) error {
 	if s.config.historiesDir == "" || workflowType == "" {
 		return nil
@@ -206,132 +201,6 @@ func (s *WorkflowTestSuite) replayAndDeleteHistories(
 	return nil
 }
 
-// dynamicActivityHandler infers what to return for an activity based on
-// mocked outputs.
-func (env *TestWorkflowEnvironment) dynamicActivityHandler(ctx context.Context, payloads converter.EncodedValues) (interface{}, error) {
-	info := activity.GetInfo(ctx)
-	wfID := info.WorkflowExecution.ID
-	actName := info.ActivityType.Name
-
-	stubFn, ok := env.activityStubFnRef[actName]
-	if !ok {
-		return nil, fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID)
-	}
-
-	decoded, err := decodePayloadsViaFnType(payloads, stubFn)
-	if err != nil {
-		return nil, fmt.Errorf("decode payloads for %s: %w", actName, err)
-	}
-
-	for _, c := range env.activityStubs[actName] {
-		if stubCallMatches(c, decoded) {
-			return extractReturn(c.returns)
-		}
-	}
-	return nil, fmt.Errorf("replaysuite: no stub matched activity %s args=%v", actName, decoded)
-}
-
-// dynamicWorkflowHandler serves child workflows from the OnWorkflow mocks.
-func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context, payloads converter.EncodedValues) (interface{}, error) {
-	info := workflow.GetInfo(ctx)
-	wfType := info.WorkflowType.Name
-
-	parent := info.ParentWorkflowExecution
-	if parent == nil {
-		return nil, fmt.Errorf("replaysuite: workflow %s has no parent; only mocked child workflows are served by the dynamic handler", wfType)
-	}
-
-	stubFn, ok := env.workflowStubFnRef[wfType]
-	if !ok {
-		return nil, fmt.Errorf("replaysuite: no OnWorkflow stub for child workflow %s in workflow %s", wfType, parent.ID)
-	}
-
-	decoded, err := decodePayloadsViaFnType(payloads, stubFn)
-	if err != nil {
-		return nil, fmt.Errorf("decode payloads for child workflow %s: %w", wfType, err)
-	}
-
-	for _, c := range env.workflowStubs[wfType] {
-		if stubCallMatches(c, decoded) {
-			return extractReturn(c.returns)
-		}
-	}
-	return nil, fmt.Errorf("replaysuite: no OnWorkflow stub matched child workflow %s args=%v", wfType, decoded)
-}
-
-func stubCallMatches(c stubCall, decoded []interface{}) bool {
-	_, differences := mock.Arguments(c.expectedArgs).Diff(decoded)
-	return differences == 0
-}
-
-// decodePayloadsViaFnType decodes raw payloads into Go values using the
-// parameter types of the user-supplied function (skipping the leading
-// context arg — context.Context for activities, workflow.Context for
-// workflows). The decoded values are returned in the same order/shape as the
-// args passed to OnActivity/OnWorkflow (after context-strip).
-func decodePayloadsViaFnType(payloads converter.EncodedValues, fn interface{}) ([]interface{}, error) {
-	fnType := reflect.TypeOf(fn)
-	if fnType.Kind() != reflect.Func {
-		return nil, fmt.Errorf("not a function")
-	}
-	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
-	wfCtxType := reflect.TypeOf((*workflow.Context)(nil)).Elem()
-
-	startIdx := 0
-	if fnType.NumIn() > 0 {
-		if first := fnType.In(0); first.Implements(ctxType) || first.Implements(wfCtxType) {
-			startIdx = 1
-		}
-	}
-	argCount := fnType.NumIn() - startIdx
-	ptrs := make([]interface{}, argCount)
-	values := make([]reflect.Value, argCount)
-	for i := 0; i < argCount; i++ {
-		t := fnType.In(i + startIdx)
-		v := reflect.New(t)
-		ptrs[i] = v.Interface()
-		values[i] = v
-	}
-	if argCount > 0 {
-		if err := payloads.Get(ptrs...); err != nil {
-			return nil, err
-		}
-	}
-	out := make([]interface{}, argCount)
-	for i, v := range values {
-		out[i] = v.Elem().Interface()
-	}
-	return out, nil
-}
-
-// extractReturn converts the user's [result, err] or [err] slice into
-// the dynamic activity's (interface{}, error) return shape. This
-// effectively implements the activity's logic to simply return what
-// was specified by the mock, which is good enough since the event
-// history is independent of the activity's logic.
-func extractReturn(rets []interface{}) (interface{}, error) {
-	switch len(rets) {
-	case 0:
-		return nil, nil
-	case 1:
-		if rets[0] == nil {
-			return nil, nil
-		}
-		if e, ok := rets[0].(error); ok {
-			return nil, e
-		}
-		return rets[0], nil
-	default:
-		var err error
-		if rets[1] != nil {
-			if e, ok := rets[1].(error); ok {
-				err = e
-			}
-		}
-		return rets[0], err
-	}
-}
-
 func sanitize(s string) string { return strings.ReplaceAll(s, "/", "_") }
 
 func historyFileName(workflowID, runID string) string {
@@ -350,7 +219,7 @@ func historyFileName(workflowID, runID string) string {
 // dynamic workflow handler — is skipped: those histories are not
 // representative of the real workflow implementation and are never replayed,
 // so writing them would only leave uncleaned files in dir.
-func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTypes map[string]interface{}, redactWorkerIdentity bool) error {
+func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTypes map[string]any, redactWorkerIdentity bool) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -388,7 +257,7 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 			if err != nil {
 				return err
 			}
-			var value interface{}
+			var value any
 			if err := json.Unmarshal(raw, &value); err != nil {
 				return err
 			}
@@ -427,9 +296,9 @@ func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTy
 // Note that because multiple protos in the history have an identity field,
 // this helper makes the change on the raw value rather than a history proto
 // object.
-func redactWorkerIdentityInHistory(value interface{}) {
+func redactWorkerIdentityInHistory(value any) {
 	switch v := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if _, ok := v["identity"].(string); ok {
 			v["identity"] = "placeholder"
 		}
@@ -445,31 +314,31 @@ func redactWorkerIdentityInHistory(value interface{}) {
 		for _, child := range v {
 			redactWorkerIdentityInHistory(child)
 		}
-	case []interface{}:
+	case []any:
 		for _, child := range v {
 			redactWorkerIdentityInHistory(child)
 		}
 	}
 }
 
-func annotatePayloadData(value interface{}) {
+func annotatePayloadData(value any) {
 	switch v := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if decoded, ok := decodePayloadData(v); ok {
 			v[decodedPayloadDataJSONKey] = decoded
 		}
 		for _, child := range v {
 			annotatePayloadData(child)
 		}
-	case []interface{}:
+	case []any:
 		for _, child := range v {
 			annotatePayloadData(child)
 		}
 	}
 }
 
-func decodePayloadData(payload map[string]interface{}) (interface{}, bool) {
-	metadata, ok := payload["metadata"].(map[string]interface{})
+func decodePayloadData(payload map[string]any) (any, bool) {
+	metadata, ok := payload["metadata"].(map[string]any)
 	if !ok {
 		return nil, false
 	}
@@ -494,7 +363,7 @@ func decodePayloadData(payload map[string]interface{}) (interface{}, bool) {
 		if err != nil {
 			return nil, false
 		}
-		var decoded interface{}
+		var decoded any
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.UseNumber()
 		if err := decoder.Decode(&decoded); err != nil {
