@@ -255,32 +255,6 @@ func extractReturn(rets []any) (any, error) {
 	}
 }
 
-// TODO: Implement all methods from the original MockCallWrapper.
-type MockCallWrapper struct {
-	call  *mock.Call
-	inner *testsuite.MockCallWrapper
-}
-
-func (m *MockCallWrapper) Return(returnArguments ...any) *MockCallWrapper {
-	m.call.Return(returnArguments...)
-	m.inner.Return(returnArguments...)
-	return m
-}
-
-func (m *MockCallWrapper) Once() *MockCallWrapper {
-	return m.Times(1)
-}
-
-func (m *MockCallWrapper) Twice() *MockCallWrapper {
-	return m.Times(2)
-}
-
-func (m *MockCallWrapper) Times(i int) *MockCallWrapper {
-	m.call.Times(i)
-	m.inner.Times(i)
-	return m
-}
-
 // getFunctionName is a straight copy from what Go SDK does.
 // https://github.com/temporalio/sdk-go/blob/35367242edb9e92be90825cd7653ab0046a660d1/internal/internal_worker.go#L2565
 func getFunctionName(i any) (name string, isMethod bool) {
