@@ -25,7 +25,7 @@ type WorkflowTestSuite struct {
 	// event histories for each test, as well as do replay testing for each
 	// workflow that is registered for that.
 	replaysuite.WorkflowTestSuite
-	env *replaysuite.Env
+	env *replaysuite.TestWorkflowEnvironment
 }
 
 func TestWorkflowTestSuite(t *testing.T) {

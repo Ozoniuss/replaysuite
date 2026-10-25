@@ -65,6 +65,20 @@ type WorkflowTestSuite struct {
 	started bool
 }
 
+func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironment {
+	// needed to support parallel tests
+	idx := atomic.AddInt64(&s.envCount, 1)
+	return &TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
+		suite:                   s,
+		envIdx:                  idx,
+		stubs:                   map[string][]stubCall{},
+		stubFnRef:               map[string]any{},
+		workflowStubs:           map[string][]stubCall{},
+		workflowStubFnRef:       map[string]any{},
+	}
+}
+
 type config struct {
 	// TODO: add support for any type of FS.
 	historiesDir         string
@@ -133,6 +147,9 @@ func (s *WorkflowTestSuite) Start(opts ...Option) error {
 		}
 	}
 
+	// In order to produce event histories, the replay test environment
+	// spins up an in-process temporal cluster and a shared worker and
+	// registers all workflows and activities on that shared worker.
 	srv, err := testsuite.StartDevServer(context.Background(), testsuite.DevServerOptions{
 		// Without this option, the minimum duration of a timer or a retry seems
 		// to be capped at 1s.
@@ -149,8 +166,7 @@ func (s *WorkflowTestSuite) Start(opts ...Option) error {
 	return nil
 }
 
-// Stop dumps observed histories and tears down the dev server. Safe to call
-// when Start was never called (no-op in that case).
+// Stop dumps observed histories and tears down the dev server.
 func (s *WorkflowTestSuite) Stop() error {
 	if !s.started {
 		return nil
@@ -172,23 +188,6 @@ func (s *WorkflowTestSuite) Stop() error {
 	}
 	s.started = false
 	return dumperr
-}
-
-// NewTestWorkflowEnvironment returns a wrapper environment for
-// *testsuite.TestWorkflowEnvironment that allows replay testing on top
-// of the existing workflow tests.
-func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *Env {
-	// needed to support parallel tests
-	idx := atomic.AddInt64(&s.envCount, 1)
-	return &Env{
-		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
-		suite:                   s,
-		envIdx:                  idx,
-		stubs:                   map[string][]stubCall{},
-		stubFnRef:               map[string]any{},
-		workflowStubs:           map[string][]stubCall{},
-		workflowStubFnRef:       map[string]any{},
-	}
 }
 
 func (s *WorkflowTestSuite) ensureWorkerCreated() {
@@ -288,7 +287,7 @@ func (s *WorkflowTestSuite) dynamicActivityHandler(ctx context.Context, payloads
 	if !ok {
 		return nil, fmt.Errorf("replaysuite: no env registered for workflow %s (activity %s)", wfID, actName)
 	}
-	env := raw.(*Env)
+	env := raw.(*TestWorkflowEnvironment)
 
 	stubFn, ok := env.stubFnRef[actName]
 	if !ok {
@@ -329,7 +328,7 @@ func (s *WorkflowTestSuite) dynamicWorkflowHandler(ctx workflow.Context, payload
 	if !ok {
 		return nil, fmt.Errorf("replaysuite: no env registered for parent workflow %s (child %s)", parent.ID, wfType)
 	}
-	env := raw.(*Env)
+	env := raw.(*TestWorkflowEnvironment)
 
 	stubFn, ok := env.workflowStubFnRef[wfType]
 	if !ok {

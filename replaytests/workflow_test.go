@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func newEnv() *replaysuite.Env {
+func newEnv() *replaysuite.TestWorkflowEnvironment {
 	env := testMainSuite.NewTestWorkflowEnvironment()
 	// ChildWorkflow is invoked by name via ExecuteChildWorkflow, so it must be
 	// registered explicitly (the parent Workflow auto-registers on execute).

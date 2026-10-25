@@ -9,7 +9,7 @@ import (
 
 type WorkflowTimerTestSuite struct {
 	BaseTestSuite
-	env *replaysuite.Env
+	env *replaysuite.TestWorkflowEnvironment
 }
 
 func TestWorkflowTimerTestSuite(t *testing.T) {

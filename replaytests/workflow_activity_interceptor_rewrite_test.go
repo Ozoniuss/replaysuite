@@ -11,7 +11,7 @@ import (
 
 type WorkflowWithActivityCustomRetryPolicyTestSuite struct {
 	BaseTestSuite
-	env *replaysuite.Env
+	env *replaysuite.TestWorkflowEnvironment
 }
 
 func TestWorkflowWithActivityCustomRetryPolicyTestSuite(t *testing.T) {

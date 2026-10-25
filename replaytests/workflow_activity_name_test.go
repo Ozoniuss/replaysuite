@@ -10,7 +10,7 @@ import (
 
 type WorkflowActivityNameTestSuite struct {
 	BaseTestSuite
-	env *replaysuite.Env
+	env *replaysuite.TestWorkflowEnvironment
 }
 
 func TestWorkflowActivityNameTestSuite(t *testing.T) {

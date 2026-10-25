@@ -9,7 +9,7 @@ import (
 
 type WorkflowSleepTestSuite struct {
 	BaseTestSuite
-	env *replaysuite.Env
+	env *replaysuite.TestWorkflowEnvironment
 }
 
 func TestWorkflowSleepTestSuite(t *testing.T) {

@@ -15,19 +15,11 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// Env wraps *testsuite.TestWorkflowEnvironment. It is meant to be used
-// as a drop-in replacement for *testsuite.TestWorkflowEnvironment such
-// that the previously-written tests keep working as-is, on top of which
-// event histories are generated for each ExecuteWorkflow call. These
-// event histories can later be used for replay testing.
-//
-// In order to produce event histories, the replay test environment
-// spins up an in-process temporal cluster and a shared worker and
-// registers all workflows and activities on that shared worker. This
-// is sufficient for replay testing given that the actual worker
-// running the activity or the activity options don't actually matter
-// for replay testing.
-type Env struct {
+// TestWorkflowEnvironment can be used as a drop-in replacement for
+// *testsuite.TestWorkflowEnvironment. Existing tests will continue working as
+// expected and can be used to generate event histories. This environment can
+// then use those histories to run replay tests.
+type TestWorkflowEnvironment struct {
 	*testsuite.TestWorkflowEnvironment
 
 	suite    *WorkflowTestSuite
@@ -61,7 +53,7 @@ type stubCall struct {
 //
 // TODO: Implement all methods from the original MockCallWrapper.
 type MockCallWrapper struct {
-	env     *Env
+	env     *TestWorkflowEnvironment
 	name    string
 	stubIdx int
 	// isWorkflow distinguishes a wrapper created by OnWorkflow from one
@@ -86,7 +78,7 @@ func (m *MockCallWrapper) Once() *MockCallWrapper {
 	return m
 }
 
-func (e *Env) OnActivity(activityFn any, args ...any) *MockCallWrapper {
+func (e *TestWorkflowEnvironment) OnActivity(activityFn any, args ...any) *MockCallWrapper {
 
 	// TODO: do we need to handle method registration?
 	name, _ := getFunctionName(activityFn)
@@ -120,7 +112,7 @@ func (e *Env) OnActivity(activityFn any, args ...any) *MockCallWrapper {
 // Like OnActivity, the first arg is the context placeholder (mock.Anything
 // by convention) — here it stands in for the child's workflow.Context — and
 // is stripped before matching against runtime args.
-func (e *Env) OnWorkflow(workflowFn any, args ...any) *MockCallWrapper {
+func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockCallWrapper {
 	name, _ := getFunctionName(workflowFn)
 
 	matchArgs := []any{}
@@ -153,11 +145,11 @@ func (e *Env) OnWorkflow(workflowFn any, args ...any) *MockCallWrapper {
 // dynamic one), so we deliberately don't — child workflows reached on the
 // mirror must be mocked via OnWorkflow, exactly as activities must be mocked
 // via OnActivity. This mirrors how RegisterActivity is handled.
-func (e *Env) RegisterWorkflow(w any) {
+func (e *TestWorkflowEnvironment) RegisterWorkflow(w any) {
 	e.TestWorkflowEnvironment.RegisterWorkflow(w)
 }
 
-func (e *Env) RegisterWorkflowWithOptions(w any, options workflow.RegisterOptions) {
+func (e *TestWorkflowEnvironment) RegisterWorkflowWithOptions(w any, options workflow.RegisterOptions) {
 	e.TestWorkflowEnvironment.RegisterWorkflowWithOptions(w, options)
 }
 
@@ -166,11 +158,11 @@ func (e *Env) RegisterWorkflowWithOptions(w any, options workflow.RegisterOption
 // handler in suite.go, which routes back to this env's OnActivity stubs.
 // Registering real activity implementations on the shared worker would
 // fight with the dynamic handler, so we deliberately don't.
-func (e *Env) RegisterActivity(a any) {
+func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
 	e.TestWorkflowEnvironment.RegisterActivity(a)
 }
 
-func (e *Env) RegisterActivityWithOptions(a any, options activity.RegisterOptions) {
+func (e *TestWorkflowEnvironment) RegisterActivityWithOptions(a any, options activity.RegisterOptions) {
 	e.TestWorkflowEnvironment.RegisterActivityWithOptions(a, options)
 }
 
@@ -178,7 +170,7 @@ func (e *Env) RegisterActivityWithOptions(a any, options activity.RegisterOption
 // (this is what determines pass/fail of the unit test) and then mirrors
 // the same run against the suite's shared dev-server worker so a real
 // history is recorded.
-func (e *Env) ExecuteWorkflow(workflowFn any, args ...any) {
+func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
 
 	if err := e.mirrorOnDevServer(workflowFn, args); err != nil {
@@ -186,7 +178,7 @@ func (e *Env) ExecuteWorkflow(workflowFn any, args ...any) {
 	}
 }
 
-func (e *Env) mirrorOnDevServer(workflowFn any, args []any) error {
+func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -225,7 +217,7 @@ func (e *Env) mirrorOnDevServer(workflowFn any, args []any) error {
 // registerWorkflowOnShared registers a workflow function on the suite's
 // shared worker, deduping by function pointer so the same workflow isn't
 // re-registered on every test.
-func (e *Env) registerWorkflowOnShared(w any, opts workflow.RegisterOptions) (string, error) {
+func (e *TestWorkflowEnvironment) registerWorkflowOnShared(w any, opts workflow.RegisterOptions) (string, error) {
 	workflowType := workflowTypeName(w, opts)
 	if _, ok := w.(string); ok {
 		return workflowType, nil
