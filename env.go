@@ -9,16 +9,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
 
-// TestWorkflowEnvironment can be used as a drop-in replacement for
-// *testsuite.TestWorkflowEnvironment. Existing tests will continue working as
-// expected and can be used to generate event histories. This environment can
-// then use those histories to run replay tests.
+// TestWorkflowEnvironment is a wrapper around *testsuite.TestWorkflowEnvironment
+// that simulates real workflow execitions on a temporal cluster. Existing tests
+// will continue working as expected.
+//
+// Note that in order to use the replay suite, you must use this instead of the
+// original *testsuite.TestWorkflowEnvironment.
 type TestWorkflowEnvironment struct {
 	*testsuite.TestWorkflowEnvironment
 
@@ -26,48 +27,40 @@ type TestWorkflowEnvironment struct {
 	envIdx   int64
 	runCount int64
 
-	// Activity stubs recorded by OnActivity. The shared worker's dynamic
-	// activity handler routes each activity call back to this table via
-	// the workflow ID (see Suite.dynamicActivityHandler).
-	stubs     map[string][]stubCall
-	stubFnRef map[string]any
+	activityStubs     map[string][]stubCall
+	activityStubFnRef map[string]any
 
-	// Child-workflow stubs recorded by OnWorkflow. The shared worker's
-	// dynamic workflow handler routes each child-workflow call back to this
-	// table via the parent workflow ID (see Suite.dynamicWorkflowHandler).
 	workflowStubs     map[string][]stubCall
 	workflowStubFnRef map[string]any
 }
 
-// stubCall records one OnActivity(...).Return(...) registration. The first
-// arg passed to OnActivity is treated as the context placeholder (e.g.
-// mock.Anything) and stripped before matching against runtime args.
 type stubCall struct {
 	expectedArgs []any
 	returns      []any
 }
 
-// MockCallWrapper overwrites the one from TestWorkflowEnvironment. It
-// keeps a reference to the inner mock call wrapper so that it can
-// still run the existing test suite.
-//
+type overriddenCall string
+
+const (
+	onActivityCall overriddenCall = "OnActivity"
+	onWorkflowCall overriddenCall = "OnWorkflow"
+)
+
 // TODO: Implement all methods from the original MockCallWrapper.
 type MockCallWrapper struct {
 	env     *TestWorkflowEnvironment
 	name    string
 	stubIdx int
-	// isWorkflow distinguishes a wrapper created by OnWorkflow from one
-	// created by OnActivity, so Return writes the recorded result into the
-	// matching stub table.
-	isWorkflow bool
-	inner      *testsuite.MockCallWrapper
+	call    overriddenCall
+	inner   *testsuite.MockCallWrapper
 }
 
 func (m *MockCallWrapper) Return(returnArguments ...any) *MockCallWrapper {
-	if m.isWorkflow {
+	switch m.call {
+	case onActivityCall:
+		m.env.activityStubs[m.name][m.stubIdx].returns = returnArguments
+	case onWorkflowCall:
 		m.env.workflowStubs[m.name][m.stubIdx].returns = returnArguments
-	} else {
-		m.env.stubs[m.name][m.stubIdx].returns = returnArguments
 	}
 	m.inner.Return(returnArguments...)
 	return m
@@ -80,39 +73,32 @@ func (m *MockCallWrapper) Once() *MockCallWrapper {
 
 func (e *TestWorkflowEnvironment) OnActivity(activityFn any, args ...any) *MockCallWrapper {
 
-	// TODO: do we need to handle method registration?
 	name, _ := getFunctionName(activityFn)
 
-	// First arg is the context placeholder (mock.Anything by convention).
-	// Strip it for our matcher; the dev-server stub never receives it as
-	// a user-visible argument.
 	matchArgs := []any{}
 	if len(args) > 1 {
 		matchArgs = args[1:]
 	}
 
-	e.stubs[name] = append(e.stubs[name], stubCall{expectedArgs: matchArgs})
-	if _, ok := e.stubFnRef[name]; !ok {
-		e.stubFnRef[name] = activityFn
+	// TODO: this can be called multiple times for the same activity or
+	// workflow, e.g. when you run it twice. Need to cover that case.
+	e.activityStubs[name] = append(e.activityStubs[name], stubCall{expectedArgs: matchArgs})
+	if _, ok := e.activityStubFnRef[name]; !ok {
+		e.activityStubFnRef[name] = activityFn
 	}
 
 	return &MockCallWrapper{
 		env:     e,
 		name:    name,
-		stubIdx: len(e.stubs[name]) - 1,
+		stubIdx: len(e.activityStubs[name]) - 1,
+		call:    onActivityCall,
 		inner:   e.TestWorkflowEnvironment.OnActivity(activityFn, args...),
 	}
+
 }
 
-// OnWorkflow is the child-workflow counterpart of OnActivity. It records a
-// stub so the shared worker's dynamic workflow handler can serve the child
-// workflow with the recorded result, and forwards to the inner env so the
-// unit test's mock behaves exactly as before.
-//
-// Like OnActivity, the first arg is the context placeholder (mock.Anything
-// by convention) — here it stands in for the child's workflow.Context — and
-// is stripped before matching against runtime args.
 func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockCallWrapper {
+
 	name, _ := getFunctionName(workflowFn)
 
 	matchArgs := []any{}
@@ -126,44 +112,12 @@ func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockC
 	}
 
 	return &MockCallWrapper{
-		env:        e,
-		name:       name,
-		stubIdx:    len(e.workflowStubs[name]) - 1,
-		isWorkflow: true,
-		inner:      e.TestWorkflowEnvironment.OnWorkflow(workflowFn, args...),
+		env:     e,
+		name:    name,
+		stubIdx: len(e.workflowStubs[name]) - 1,
+		call:    onWorkflowCall,
+		inner:   e.TestWorkflowEnvironment.OnWorkflow(workflowFn, args...),
 	}
-}
-
-// RegisterWorkflow forwards to the inner env only. It is required for any
-// workflow the user invokes by name (child workflows, continue-as-new
-// targets) so the inner TestWorkflowEnvironment can dispatch it.
-//
-// On the shared dev-server mirror, child workflows are served by the dynamic
-// workflow handler in suite.go, which routes back to this env's OnWorkflow
-// stubs. Registering the real workflow implementation on the shared worker
-// would shadow that handler (explicit registration takes precedence over the
-// dynamic one), so we deliberately don't — child workflows reached on the
-// mirror must be mocked via OnWorkflow, exactly as activities must be mocked
-// via OnActivity. This mirrors how RegisterActivity is handled.
-func (e *TestWorkflowEnvironment) RegisterWorkflow(w any) {
-	e.TestWorkflowEnvironment.RegisterWorkflow(w)
-}
-
-func (e *TestWorkflowEnvironment) RegisterWorkflowWithOptions(w any, options workflow.RegisterOptions) {
-	e.TestWorkflowEnvironment.RegisterWorkflowWithOptions(w, options)
-}
-
-// RegisterActivity / RegisterActivityWithOptions only forward to the inner
-// env. On the shared mirror, all activities are served by the dynamic
-// handler in suite.go, which routes back to this env's OnActivity stubs.
-// Registering real activity implementations on the shared worker would
-// fight with the dynamic handler, so we deliberately don't.
-func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
-	e.TestWorkflowEnvironment.RegisterActivity(a)
-}
-
-func (e *TestWorkflowEnvironment) RegisterActivityWithOptions(a any, options activity.RegisterOptions) {
-	e.TestWorkflowEnvironment.RegisterActivityWithOptions(a, options)
 }
 
 // ExecuteWorkflow runs the workflow against the inner test environment

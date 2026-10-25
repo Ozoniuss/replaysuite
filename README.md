@@ -8,6 +8,14 @@ TODOs:
 - workflow with timer takes a shit ton of time to run even with server timer granularity set to 1ms. need some further investiagtions
 - check how dynamic workflows/activities show up in the UI.
 
+	ao := workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
+	}
+	ctx = workflow.WithActivityOptions(ctx, ao)
+
+missing activity options cause the suite to complete successfully. need to fail
+somehow if the dev server fails.
+
 See [`replaytests/`](./replaytests/) for runnable examples.
 
 ## What this is

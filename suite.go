@@ -72,8 +72,8 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
 		suite:                   s,
 		envIdx:                  idx,
-		stubs:                   map[string][]stubCall{},
-		stubFnRef:               map[string]any{},
+		activityStubs:                   map[string][]stubCall{},
+		activityStubFnRef:               map[string]any{},
 		workflowStubs:           map[string][]stubCall{},
 		workflowStubFnRef:       map[string]any{},
 	}
@@ -289,7 +289,7 @@ func (s *WorkflowTestSuite) dynamicActivityHandler(ctx context.Context, payloads
 	}
 	env := raw.(*TestWorkflowEnvironment)
 
-	stubFn, ok := env.stubFnRef[actName]
+	stubFn, ok := env.activityStubFnRef[actName]
 	if !ok {
 		return nil, fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID)
 	}
@@ -299,7 +299,7 @@ func (s *WorkflowTestSuite) dynamicActivityHandler(ctx context.Context, payloads
 		return nil, fmt.Errorf("decode payloads for %s: %w", actName, err)
 	}
 
-	for _, c := range env.stubs[actName] {
+	for _, c := range env.activityStubs[actName] {
 		if stubCallMatches(c, decoded) {
 			return extractReturn(c.returns)
 		}
