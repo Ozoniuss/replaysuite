@@ -35,43 +35,13 @@ type TestWorkflowEnvironment struct {
 	workflowStubFnRef map[string]any
 }
 
-type stubCall struct {
-	expectedArgs []any
-	returns      []any
-}
+func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
+	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
 
-type overriddenCall string
-
-const (
-	onActivityCall overriddenCall = "OnActivity"
-	onWorkflowCall overriddenCall = "OnWorkflow"
-)
-
-// TODO: Implement all methods from the original MockCallWrapper.
-type MockCallWrapper struct {
-	env     *TestWorkflowEnvironment
-	name    string
-	stubIdx int
-	call    overriddenCall
-	inner   *testsuite.MockCallWrapper
-}
-
-func (m *MockCallWrapper) Return(returnArguments ...any) *MockCallWrapper {
-	switch m.call {
-	case onActivityCall:
-		m.env.activityStubs[m.name][m.stubIdx].returns = returnArguments
-	case onWorkflowCall:
-		m.env.workflowStubs[m.name][m.stubIdx].returns = returnArguments
+	if err := e.mirrorOnDevServer(workflowFn, args); err != nil {
+		panic(fmt.Sprintf("[replaysuite] dev-server mirror failed: %v", err))
 	}
-	m.inner.Return(returnArguments...)
-	return m
 }
-
-func (m *MockCallWrapper) Once() *MockCallWrapper {
-	m.inner.Once()
-	return m
-}
-
 func (e *TestWorkflowEnvironment) OnActivity(activityFn any, args ...any) *MockCallWrapper {
 
 	name, _ := getFunctionName(activityFn)
@@ -121,24 +91,12 @@ func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockC
 	}
 }
 
-// ExecuteWorkflow runs the workflow against the inner test environment
-// (this is what determines pass/fail of the unit test) and then mirrors
-// the same run against the suite's shared dev-server worker so a real
-// history is recorded.
-func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
-	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
-
-	if err := e.mirrorOnDevServer(workflowFn, args); err != nil {
-		panic(fmt.Sprintf("[replaysuite] dev-server mirror failed: %v", err))
-	}
-}
-
 func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// we can run each workflow on a separate task queue and have it handled by
-	// a different worker.
+	// Start a new worker for each executed workflow. If this becomes expensive,
+	// it may be a good idea to use shared workers.
 	taskQueue := "replaysuite-" + uuid.NewString()
 	w := worker.New(e.suite.client, taskQueue, worker.Options{
 		Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{taskQueue: taskQueue}},
@@ -146,8 +104,9 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	if _, ok := workflowFn.(string); !ok {
 		w.RegisterWorkflow(workflowFn)
 	}
-	// Activities and child workflows are not registered, so they fall
-	// through to the dynamic handlers, which serve them from the mocks.
+
+	// run mocked code
+	// todo: handle actual activities
 	w.RegisterDynamicActivity(e.dynamicActivityHandler, activity.DynamicRegisterOptions{})
 	w.RegisterDynamicWorkflow(e.dynamicWorkflowHandler, workflow.DynamicRegisterOptions{})
 	if err := w.Start(); err != nil {
@@ -162,10 +121,47 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	if err != nil {
 		return fmt.Errorf("execute workflow: %w", err)
 	}
-	// Discard result/error — the inner env is the source of truth for the
-	// test; the mirror only exists to produce a history.
+	// TODO: maybe the workflow errored somehow on dev server (e.g. missing
+	// activity policy). Figure out what to do there.
 	_ = run.Get(ctx, nil)
 	return nil
+}
+
+type stubCall struct {
+	expectedArgs []any
+	returns      []any
+}
+
+type overriddenCall string
+
+const (
+	onActivityCall overriddenCall = "OnActivity"
+	onWorkflowCall overriddenCall = "OnWorkflow"
+)
+
+// TODO: Implement all methods from the original MockCallWrapper.
+type MockCallWrapper struct {
+	env     *TestWorkflowEnvironment
+	name    string
+	stubIdx int
+	call    overriddenCall
+	inner   *testsuite.MockCallWrapper
+}
+
+func (m *MockCallWrapper) Return(returnArguments ...any) *MockCallWrapper {
+	switch m.call {
+	case onActivityCall:
+		m.env.activityStubs[m.name][m.stubIdx].returns = returnArguments
+	case onWorkflowCall:
+		m.env.workflowStubs[m.name][m.stubIdx].returns = returnArguments
+	}
+	m.inner.Return(returnArguments...)
+	return m
+}
+
+func (m *MockCallWrapper) Once() *MockCallWrapper {
+	m.inner.Once()
+	return m
 }
 
 // getFunctionName is a straight copy from what Go SDK does.
