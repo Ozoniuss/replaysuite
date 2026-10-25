@@ -6,11 +6,14 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -23,9 +26,7 @@ import (
 type TestWorkflowEnvironment struct {
 	*testsuite.TestWorkflowEnvironment
 
-	suite    *WorkflowTestSuite
-	envIdx   int64
-	runCount int64
+	suite *WorkflowTestSuite
 
 	activityStubs     map[string][]stubCall
 	activityStubFnRef map[string]any
@@ -136,28 +137,27 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Register the workflow on the shared mirror worker before starting it.
-	// A real worker.Worker does not auto-register workflows the way the inner
-	// TestWorkflowEnvironment does, so without this the dev-server task fails
-	// with "unable to find workflow type" until the mirror times out.
-	if _, err := e.registerWorkflowOnShared(workflowFn, workflow.RegisterOptions{
-		DisableAlreadyRegisteredCheck: true,
-	}); err != nil {
-		return err
+	// we can run each workflow on a separate task queue and have it handled by
+	// a different worker.
+	taskQueue := "replaysuite-" + uuid.NewString()
+	w := worker.New(e.suite.client, taskQueue, worker.Options{
+		Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{taskQueue: taskQueue}},
+	})
+	if _, ok := workflowFn.(string); !ok {
+		w.RegisterWorkflow(workflowFn)
 	}
-	if err := e.suite.startSharedWorker(); err != nil {
-		return err
+	// Activities and child workflows are not registered, so they fall
+	// through to the dynamic handlers, which serve them from the mocks.
+	w.RegisterDynamicActivity(e.dynamicActivityHandler, activity.DynamicRegisterOptions{})
+	w.RegisterDynamicWorkflow(e.dynamicWorkflowHandler, workflow.DynamicRegisterOptions{})
+	if err := w.Start(); err != nil {
+		return fmt.Errorf("start worker: %w", err)
 	}
-
-	runIdx := atomic.AddInt64(&e.runCount, 1)
-	wfID := fmt.Sprintf("replaysuite-env%d-run%d", e.envIdx, runIdx)
-
-	e.suite.envsByWFID.Store(wfID, e)
-	defer e.suite.envsByWFID.Delete(wfID)
+	defer w.Stop()
 
 	run, err := e.suite.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		ID:        wfID,
-		TaskQueue: sharedTaskQueue,
+		ID:        taskQueue,
+		TaskQueue: taskQueue,
 	}, workflowFn, args...)
 	if err != nil {
 		return fmt.Errorf("execute workflow: %w", err)
@@ -166,38 +166,6 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	// test; the mirror only exists to produce a history.
 	_ = run.Get(ctx, nil)
 	return nil
-}
-
-// registerWorkflowOnShared registers a workflow function on the suite's
-// shared worker, deduping by function pointer so the same workflow isn't
-// re-registered on every test.
-func (e *TestWorkflowEnvironment) registerWorkflowOnShared(w any, opts workflow.RegisterOptions) (string, error) {
-	workflowType := workflowTypeName(w, opts)
-	if _, ok := w.(string); ok {
-		return workflowType, nil
-	}
-
-	e.suite.ensureWorkerCreated()
-	// make sure the workflow is registered before it is ever started
-	e.suite.workflowSetMu.Lock()
-	defer e.suite.workflowSetMu.Unlock()
-	if e.suite.workflowSet == nil {
-		e.suite.workflowSet = map[string]struct{}{}
-	}
-	if _, ok := e.suite.workflowSet[workflowType]; ok {
-		return workflowType, nil
-	}
-	e.suite.worker.RegisterWorkflowWithOptions(w, opts)
-	e.suite.workflowSet[workflowType] = struct{}{}
-	return workflowType, nil
-}
-
-func workflowTypeName(w any, opts workflow.RegisterOptions) string {
-	if opts.Name != "" {
-		return opts.Name
-	}
-	name, _ := getFunctionName(w)
-	return name
 }
 
 // getFunctionName is a straight copy from what Go SDK does.

@@ -11,8 +11,6 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/stretchr/testify/mock"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -21,7 +19,6 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
-	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -30,7 +27,6 @@ import (
 
 const (
 	defaultHistoriesDir       = ".histories"
-	sharedTaskQueue           = "replaysuite-shared"
 	decodedPayloadDataJSONKey = "__replaysuite_decodedData"
 )
 
@@ -42,38 +38,19 @@ const (
 type WorkflowTestSuite struct {
 	testsuite.WorkflowTestSuite
 
-	server   *testsuite.DevServer
-	client   client.Client
-	envCount int64
-
-	// Shared worker, created lazily when workflows are registered and started
-	// lazily on first ExecuteWorkflow. All Envs share it so the per-test
-	// worker startup cost is paid once.
-	workerCreateOnce sync.Once
-	workerStartOnce  sync.Once
-	worker           worker.Worker
-	workerStartErr   error
-	envsByWFID       sync.Map // workflowID -> *Env, consulted by the dynamic activity handler
-
-	workflowSetMu sync.Mutex
-	workflowSet   map[string]struct{} // workflow type name -> struct{}, dedupes RegisterWorkflow calls
-
-	wfIDsMu sync.Mutex
-	wfIDs   []string // every workflowID launched on the mirror; consulted by dumpAllHistories
+	server *testsuite.DevServer
+	client client.Client
 
 	config  config
 	started bool
 }
 
 func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironment {
-	// needed to support parallel tests
-	idx := atomic.AddInt64(&s.envCount, 1)
 	return &TestWorkflowEnvironment{
 		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
 		suite:                   s,
-		envIdx:                  idx,
-		activityStubs:                   map[string][]stubCall{},
-		activityStubFnRef:               map[string]any{},
+		activityStubs:           map[string][]stubCall{},
+		activityStubFnRef:       map[string]any{},
 		workflowStubs:           map[string][]stubCall{},
 		workflowStubFnRef:       map[string]any{},
 	}
@@ -126,11 +103,10 @@ func WithReplayWorkflows(fns ...interface{}) Option {
 }
 
 // Start replays existing histories (unless WithSkipReplayTest is set), then
-// starts the dev server. Must be called before any test creates an Env via
-// NewTestWorkflowEnvironment, and must not be called twice.
+// starts the dev server.
 func (s *WorkflowTestSuite) Start(opts ...Option) error {
 	if s.started {
-		return fmt.Errorf("replaysuite: Start called twice")
+		return nil
 	}
 	for _, opt := range opts {
 		opt(&s.config)
@@ -171,9 +147,6 @@ func (s *WorkflowTestSuite) Stop() error {
 	if !s.started {
 		return nil
 	}
-	if s.worker != nil {
-		s.worker.Stop()
-	}
 	var dumperr error
 	if s.client != nil && s.config.historiesDir != "" {
 		if err := dumpAllHistories(context.Background(), s.client, s.config.historiesDir, s.config.replayWorkflows, s.config.redactWorkerIdentity); err != nil {
@@ -188,49 +161,6 @@ func (s *WorkflowTestSuite) Stop() error {
 	}
 	s.started = false
 	return dumperr
-}
-
-func (s *WorkflowTestSuite) ensureWorkerCreated() {
-	s.workerCreateOnce.Do(func() {
-		s.worker = worker.New(s.client, sharedTaskQueue, worker.Options{
-			Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{}},
-		})
-
-		// register empty activities and workflow types on the worker, which
-		// still create histories based on mocked payloads but don't actually
-		// execute anything.
-		//
-		// see https://docs.temporal.io/dynamic-handler
-
-		s.worker.RegisterDynamicActivity(
-			func(ctx context.Context, payloads converter.EncodedValues) (interface{}, error) {
-				return s.dynamicActivityHandler(ctx, payloads)
-			},
-			activity.DynamicRegisterOptions{},
-		)
-
-		s.worker.RegisterDynamicWorkflow(
-			func(ctx workflow.Context, payloads converter.EncodedValues) (interface{}, error) {
-				return s.dynamicWorkflowHandler(ctx, payloads)
-			},
-			workflow.DynamicRegisterOptions{},
-		)
-	})
-}
-
-// note that workflows must be registered to the shared worker in the
-// wrapping environment before starting the worker so it doesn't poll
-// tasks for workflows it doesn't know about yet.ß
-func (s *WorkflowTestSuite) startSharedWorker() error {
-	s.ensureWorkerCreated()
-
-	s.workerStartOnce.Do(func() {
-		if err := s.worker.Start(); err != nil {
-			s.workerStartErr = fmt.Errorf("worker start: %w", err)
-			return
-		}
-	})
-	return s.workerStartErr
 }
 
 func (s *WorkflowTestSuite) replayAndDeleteHistories(
@@ -278,16 +208,10 @@ func (s *WorkflowTestSuite) replayAndDeleteHistories(
 
 // dynamicActivityHandler infers what to return for an activity based on
 // mocked outputs.
-func (s *WorkflowTestSuite) dynamicActivityHandler(ctx context.Context, payloads converter.EncodedValues) (interface{}, error) {
+func (env *TestWorkflowEnvironment) dynamicActivityHandler(ctx context.Context, payloads converter.EncodedValues) (interface{}, error) {
 	info := activity.GetInfo(ctx)
 	wfID := info.WorkflowExecution.ID
 	actName := info.ActivityType.Name
-
-	raw, ok := s.envsByWFID.Load(wfID)
-	if !ok {
-		return nil, fmt.Errorf("replaysuite: no env registered for workflow %s (activity %s)", wfID, actName)
-	}
-	env := raw.(*TestWorkflowEnvironment)
 
 	stubFn, ok := env.activityStubFnRef[actName]
 	if !ok {
@@ -307,15 +231,8 @@ func (s *WorkflowTestSuite) dynamicActivityHandler(ctx context.Context, payloads
 	return nil, fmt.Errorf("replaysuite: no stub matched activity %s args=%v", actName, decoded)
 }
 
-// dynamicWorkflowHandler is the catch-all workflow registered on the shared
-// worker. Child workflows started via ExecuteChildWorkflow land here — the
-// parent workflow under replay is explicitly registered, so it keeps being
-// served by its real implementation, while child workflows are not registered
-// on the shared worker and so fall through to this handler. It looks up the
-// parent's Env by parent workflow ID, decodes the child's payload using the
-// type info captured at OnWorkflow time, and returns the matching stub's
-// recorded result.
-func (s *WorkflowTestSuite) dynamicWorkflowHandler(ctx workflow.Context, payloads converter.EncodedValues) (interface{}, error) {
+// dynamicWorkflowHandler serves child workflows from the OnWorkflow mocks.
+func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context, payloads converter.EncodedValues) (interface{}, error) {
 	info := workflow.GetInfo(ctx)
 	wfType := info.WorkflowType.Name
 
@@ -323,12 +240,6 @@ func (s *WorkflowTestSuite) dynamicWorkflowHandler(ctx workflow.Context, payload
 	if parent == nil {
 		return nil, fmt.Errorf("replaysuite: workflow %s has no parent; only mocked child workflows are served by the dynamic handler", wfType)
 	}
-
-	raw, ok := s.envsByWFID.Load(parent.ID)
-	if !ok {
-		return nil, fmt.Errorf("replaysuite: no env registered for parent workflow %s (child %s)", parent.ID, wfType)
-	}
-	env := raw.(*TestWorkflowEnvironment)
 
 	stubFn, ok := env.workflowStubFnRef[wfType]
 	if !ok {

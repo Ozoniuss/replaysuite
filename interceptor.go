@@ -8,31 +8,29 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// shortRetryInterval is the value we clamp retry intervals to.
-// Anything > 0 is fine since changing retry options does not lead to
-// nondeterminism.
 const shortRetryInterval = time.Millisecond
 
-// fastReplayInterceptor is a worker interceptor intended for the
-// shared replay worker that rewrites every workflow's ExecuteActivity,
-// NewTimer and Sleep call to be effectively instant.
+// fastReplayInterceptor tries to make all worker calls that are running in the
+// replay test suite happen instantaneously.
 type fastReplayInterceptor struct {
 	interceptor.WorkerInterceptorBase
+	taskQueue string
 }
 
 func (i *fastReplayInterceptor) InterceptWorkflow(
 	ctx workflow.Context, next interceptor.WorkflowInboundInterceptor,
 ) interceptor.WorkflowInboundInterceptor {
-	return &fastReplayInbound{root: next}
+	return &fastReplayInbound{root: next, taskQueue: i.taskQueue}
 }
 
 type fastReplayInbound struct {
 	interceptor.WorkflowInboundInterceptorBase
-	root interceptor.WorkflowInboundInterceptor
+	root      interceptor.WorkflowInboundInterceptor
+	taskQueue string
 }
 
 func (in *fastReplayInbound) Init(outbound interceptor.WorkflowOutboundInterceptor) error {
-	wrapped := &fastReplayOutbound{}
+	wrapped := &fastReplayOutbound{taskQueue: in.taskQueue}
 	wrapped.Next = outbound
 	in.Next = in.root
 	return in.root.Init(wrapped)
@@ -40,13 +38,15 @@ func (in *fastReplayInbound) Init(outbound interceptor.WorkflowOutboundIntercept
 
 type fastReplayOutbound struct {
 	interceptor.WorkflowOutboundInterceptorBase
+	taskQueue string
 }
 
 func (o *fastReplayOutbound) ExecuteActivity(
 	ctx workflow.Context, activityType string, args ...interface{},
 ) workflow.Future {
 	opts := workflow.GetActivityOptions(ctx)
-	opts.TaskQueue = sharedTaskQueue
+	// Overwrite the task queue to the one used by the replay worker.
+	opts.TaskQueue = o.taskQueue
 	// Overwrite the retry policy to something that executes quickly on the
 	// dev server.
 	if opts.RetryPolicy == nil {

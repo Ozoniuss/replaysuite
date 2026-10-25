@@ -2,7 +2,6 @@ package replaytests
 
 import (
 	"testing"
-	"time"
 
 	"github.com/Ozoniuss/replaysuite"
 	"github.com/stretchr/testify/mock"
@@ -33,8 +32,6 @@ func Test_WithSameActivityCalledTwice_MultipleMocksWork(t *testing.T) {
 	env.ExecuteWorkflow(WorkflowWithSameActivityCalledTwice, "Temporal")
 
 	require.True(t, env.IsWorkflowCompleted())
-
-	time.Sleep(1 * time.Second)
 
 	err = s.Stop()
 	if err != nil {
