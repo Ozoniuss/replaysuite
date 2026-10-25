@@ -32,10 +32,12 @@ type TestWorkflowEnvironment struct {
 
 	tclient client.Client
 
-	activityStubs     map[string][]stubCall
-	activityStubFnRef map[string]any
+	activityMock mock.Mock
+	workflowMock mock.Mock
 
-	workflowStubs     map[string][]stubCall
+	// Note that each environment assumes that one workflow and one
+	// activity type are associated with one function.
+	activityStubFnRef map[string]any
 	workflowStubFnRef map[string]any
 
 	dumpHistory dumpHistoryFn
@@ -54,48 +56,27 @@ func (e *TestWorkflowEnvironment) OnActivity(activityFn any, args ...any) *MockC
 
 	name, _ := getFunctionName(activityFn)
 
-	matchArgs := []any{}
-	if len(args) > 1 {
-		matchArgs = args[1:]
-	}
-
-	// TODO: this can be called multiple times for the same activity or
-	// workflow, e.g. when you run it twice. Need to cover that case.
-	e.activityStubs[name] = append(e.activityStubs[name], stubCall{expectedArgs: matchArgs})
 	if _, ok := e.activityStubFnRef[name]; !ok {
 		e.activityStubFnRef[name] = activityFn
 	}
 
 	return &MockCallWrapper{
-		env:     e,
-		name:    name,
-		stubIdx: len(e.activityStubs[name]) - 1,
-		call:    onActivityCall,
-		inner:   e.TestWorkflowEnvironment.OnActivity(activityFn, args...),
+		call:  e.activityMock.On(name, args...),
+		inner: e.TestWorkflowEnvironment.OnActivity(activityFn, args...),
 	}
-
 }
 
 func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockCallWrapper {
 
 	name, _ := getFunctionName(workflowFn)
 
-	matchArgs := []any{}
-	if len(args) > 1 {
-		matchArgs = args[1:]
-	}
-
-	e.workflowStubs[name] = append(e.workflowStubs[name], stubCall{expectedArgs: matchArgs})
 	if _, ok := e.workflowStubFnRef[name]; !ok {
 		e.workflowStubFnRef[name] = workflowFn
 	}
 
 	return &MockCallWrapper{
-		env:     e,
-		name:    name,
-		stubIdx: len(e.workflowStubs[name]) - 1,
-		call:    onWorkflowCall,
-		inner:   e.TestWorkflowEnvironment.OnWorkflow(workflowFn, args...),
+		call:  e.workflowMock.On(name, args...),
+		inner: e.TestWorkflowEnvironment.OnWorkflow(workflowFn, args...),
 	}
 }
 
@@ -146,7 +127,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	wfType, _ := getFunctionName(workflowFn)
 	err = e.dumpHistory(wfType, taskQueue, hist)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("dump history: %w", err)
 	}
 
 	return nil
@@ -162,17 +143,16 @@ func (env *TestWorkflowEnvironment) dynamicActivityHandler(ctx context.Context, 
 		return nil, fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID)
 	}
 
-	decoded, err := decodePayloadsViaFnType(payloads, stubFn)
+	callArgs, err := decodePayloadsViaFnType(ctx, payloads, stubFn)
 	if err != nil {
 		return nil, fmt.Errorf("decode payloads for %s: %w", actName, err)
 	}
 
-	for _, c := range env.activityStubs[actName] {
-		if stubCallMatches(c, decoded) {
-			return extractReturn(c.returns)
-		}
+	rets, err := methodCalled(&env.activityMock, actName, callArgs)
+	if err != nil {
+		return nil, fmt.Errorf("replaysuite: activity %s: %w", actName, err)
 	}
-	return nil, fmt.Errorf("replaysuite: no stub matched activity %s args=%v", actName, decoded)
+	return extractReturn(rets)
 }
 
 func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context, payloads converter.EncodedValues) (any, error) {
@@ -189,20 +169,32 @@ func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context,
 		return nil, fmt.Errorf("replaysuite: no OnWorkflow stub for child workflow %s in workflow %s", wfType, parent.ID)
 	}
 
-	decoded, err := decodePayloadsViaFnType(payloads, stubFn)
+	callArgs, err := decodePayloadsViaFnType(ctx, payloads, stubFn)
 	if err != nil {
 		return nil, fmt.Errorf("decode payloads for child workflow %s: %w", wfType, err)
 	}
 
-	for _, c := range env.workflowStubs[wfType] {
-		if stubCallMatches(c, decoded) {
-			return extractReturn(c.returns)
-		}
+	rets, err := methodCalled(&env.workflowMock, wfType, callArgs)
+	if err != nil {
+		return nil, fmt.Errorf("replaysuite: child workflow %s: %w", wfType, err)
 	}
-	return nil, fmt.Errorf("replaysuite: no OnWorkflow stub matched child workflow %s args=%v", wfType, decoded)
+	return extractReturn(rets)
 }
 
-func decodePayloadsViaFnType(payloads converter.EncodedValues, fn any) ([]any, error) {
+// methodCalled reports a call to m. Without a TestingT, testify panics on
+// unexpected or exhausted calls, so the panic is converted into an error.
+func methodCalled(m *mock.Mock, name string, args []any) (rets mock.Arguments, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	return m.MethodCalled(name, args...), nil
+}
+
+// decodePayloadsViaFnType decodes payloads into the argument types of fn. If
+// fn takes a context as its first argument, ctx is prepended to the result.
+func decodePayloadsViaFnType(ctx any, payloads converter.EncodedValues, fn any) ([]any, error) {
 	fnType := reflect.TypeOf(fn)
 	if fnType.Kind() != reflect.Func {
 		return nil, fmt.Errorf("not a function")
@@ -230,9 +222,12 @@ func decodePayloadsViaFnType(payloads converter.EncodedValues, fn any) ([]any, e
 			return nil, err
 		}
 	}
-	out := make([]any, argCount)
-	for i, v := range values {
-		out[i] = v.Elem().Interface()
+	out := make([]any, 0, startIdx+argCount)
+	if startIdx == 1 {
+		out = append(out, ctx)
+	}
+	for _, v := range values {
+		out = append(out, v.Elem().Interface())
 	}
 	return out, nil
 }
@@ -260,45 +255,29 @@ func extractReturn(rets []any) (any, error) {
 	}
 }
 
-func stubCallMatches(c stubCall, decoded []any) bool {
-	_, differences := mock.Arguments(c.expectedArgs).Diff(decoded)
-	return differences == 0
-}
-
-type stubCall struct {
-	expectedArgs []any
-	returns      []any
-}
-
-type overriddenCall string
-
-const (
-	onActivityCall overriddenCall = "OnActivity"
-	onWorkflowCall overriddenCall = "OnWorkflow"
-)
-
 // TODO: Implement all methods from the original MockCallWrapper.
 type MockCallWrapper struct {
-	env     *TestWorkflowEnvironment
-	name    string
-	stubIdx int
-	call    overriddenCall
-	inner   *testsuite.MockCallWrapper
+	call  *mock.Call
+	inner *testsuite.MockCallWrapper
 }
 
 func (m *MockCallWrapper) Return(returnArguments ...any) *MockCallWrapper {
-	switch m.call {
-	case onActivityCall:
-		m.env.activityStubs[m.name][m.stubIdx].returns = returnArguments
-	case onWorkflowCall:
-		m.env.workflowStubs[m.name][m.stubIdx].returns = returnArguments
-	}
+	m.call.Return(returnArguments...)
 	m.inner.Return(returnArguments...)
 	return m
 }
 
 func (m *MockCallWrapper) Once() *MockCallWrapper {
-	m.inner.Once()
+	return m.Times(1)
+}
+
+func (m *MockCallWrapper) Twice() *MockCallWrapper {
+	return m.Times(2)
+}
+
+func (m *MockCallWrapper) Times(i int) *MockCallWrapper {
+	m.call.Times(i)
+	m.inner.Times(i)
 	return m
 }
 

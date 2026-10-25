@@ -3,8 +3,6 @@ package replaysuite
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/stretchr/testify/mock"
 )
 
 func plainActivityForNameTest() error {
@@ -101,30 +99,6 @@ func TestActivityFunctionName(t *testing.T) {
 			t.Fatal("isMethod = false, want true")
 		}
 	})
-}
-
-func TestStubCallMatchesSupportsTestifyMatchers(t *testing.T) {
-	// Given
-	call := stubCall{
-		expectedArgs: []any{
-			mock.Anything,
-			mock.MatchedBy(func(input *activityFunctionNameTestActivities) bool {
-				return input != nil
-			}),
-		},
-	}
-	decoded := []any{
-		"ignored",
-		&activityFunctionNameTestActivities{},
-	}
-
-	// When
-	matches := stubCallMatches(call, decoded)
-
-	// Then
-	if !matches {
-		t.Fatal("stubCallMatches = false, want true")
-	}
 }
 
 func TestAnnotatePayloadData(t *testing.T) {

@@ -43,15 +43,14 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
 		// hack: currently Start() must be called before NewTestWorkflowEnvironment
 		tclient:           s.client,
-		activityStubs:     map[string][]stubCall{},
 		activityStubFnRef: map[string]any{},
-		workflowStubs:     map[string][]stubCall{},
 		workflowStubFnRef: map[string]any{},
 		dumpHistory:       dumpSingleHistory,
 	}
 }
 
 type config struct {
+	hostPort             string
 	redactWorkerIdentity bool
 	skipReplayTest       bool
 	// replayWorkflows maps workflow type name to workflow function. Workflows
@@ -178,13 +177,6 @@ func (s *WorkflowTestSuite) replayAndDeleteHistories(
 }
 
 func sanitize(s string) string { return strings.ReplaceAll(s, "/", "_") }
-
-func historyFileName(workflowID, runID string) string {
-	if runID == "" {
-		return sanitize(workflowID) + ".json"
-	}
-	return sanitize(workflowID) + "_" + sanitize(runID) + ".json"
-}
 
 func dumpSingleHistory(wfType, wfId string, hist *historypb.History) error {
 

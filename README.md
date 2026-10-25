@@ -1,5 +1,8 @@
 # replay-suite
 
+
+25.10.2026 - decided to separate replay testing from writing histories.
+
 Still under development. Have not tried to clean up the code yet. All existing implementations details are subject to change.
 
 TODOs:
