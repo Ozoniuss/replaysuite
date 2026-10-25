@@ -43,11 +43,12 @@ type WorkflowTestSuite struct {
 func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironment {
 	return &TestWorkflowEnvironment{
 		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
-		suite:                   s,
-		activityStubs:           map[string][]stubCall{},
-		activityStubFnRef:       map[string]any{},
-		workflowStubs:           map[string][]stubCall{},
-		workflowStubFnRef:       map[string]any{},
+		// hack: currently Start() must be called before NewTestWorkflowEnvironment
+		tclient:           s.client,
+		activityStubs:     map[string][]stubCall{},
+		activityStubFnRef: map[string]any{},
+		workflowStubs:     map[string][]stubCall{},
+		workflowStubFnRef: map[string]any{},
 	}
 }
 

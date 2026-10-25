@@ -28,7 +28,7 @@ import (
 type TestWorkflowEnvironment struct {
 	*testsuite.TestWorkflowEnvironment
 
-	suite *WorkflowTestSuite
+	tclient client.Client
 
 	activityStubs     map[string][]stubCall
 	activityStubFnRef map[string]any
@@ -100,7 +100,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	// Start a new worker for each executed workflow. If this becomes expensive,
 	// it may be a good idea to use shared workers.
 	taskQueue := "replaysuite-" + uuid.NewString()
-	w := worker.New(e.suite.client, taskQueue, worker.Options{
+	w := worker.New(e.tclient, taskQueue, worker.Options{
 		Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{taskQueue: taskQueue}},
 	})
 	if _, ok := workflowFn.(string); !ok {
@@ -116,7 +116,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 	defer w.Stop()
 
-	run, err := e.suite.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+	run, err := e.tclient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        taskQueue,
 		TaskQueue: taskQueue,
 	}, workflowFn, args...)
