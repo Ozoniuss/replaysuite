@@ -11,9 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
-	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
@@ -49,12 +47,11 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		activityStubFnRef: map[string]any{},
 		workflowStubs:     map[string][]stubCall{},
 		workflowStubFnRef: map[string]any{},
+		dumpHistory:       dumpSingleHistory,
 	}
 }
 
 type config struct {
-	// TODO: add support for any type of FS.
-	historiesDir         string
 	redactWorkerIdentity bool
 	skipReplayTest       bool
 	// replayWorkflows maps workflow type name to workflow function. Workflows
@@ -64,12 +61,6 @@ type config struct {
 }
 
 type Option func(*config)
-
-// WithHistoriesDir overrides the directory used to read existing histories at
-// Start and to write new histories at Stop. Defaults to ".histories".
-func WithHistoriesDir(dir string) Option {
-	return func(c *config) { c.historiesDir = dir }
-}
 
 // WithRedactWorkerIdentity replaces the worker identity and sticky task queue
 // name in dumped histories with a generic placeholder.
@@ -107,9 +98,6 @@ func (s *WorkflowTestSuite) Start(opts ...Option) error {
 	for _, opt := range opts {
 		opt(&s.config)
 	}
-	if s.config.historiesDir == "" {
-		s.config.historiesDir = defaultHistoriesDir
-	}
 
 	if !s.config.skipReplayTest {
 		for workflowType, workflowFn := range s.config.replayWorkflows {
@@ -140,34 +128,21 @@ func (s *WorkflowTestSuite) Start(opts ...Option) error {
 
 // Stop dumps observed histories and tears down the dev server.
 func (s *WorkflowTestSuite) Stop() error {
-	if !s.started {
-		return nil
-	}
-	var dumperr error
-	if s.client != nil && s.config.historiesDir != "" {
-		if err := dumpAllHistories(context.Background(), s.client, s.config.historiesDir, s.config.replayWorkflows, s.config.redactWorkerIdentity); err != nil {
-			dumperr = err
-		}
-	}
 	if s.client != nil {
 		s.client.Close()
 	}
 	if s.server != nil {
 		_ = s.server.Stop()
 	}
-	s.started = false
-	return dumperr
+	return nil
 }
 
 func (s *WorkflowTestSuite) replayAndDeleteHistories(
 	workflowType string,
 	workflowFn any,
 ) error {
-	if s.config.historiesDir == "" || workflowType == "" {
-		return nil
-	}
 
-	dir := filepath.Join(s.config.historiesDir, sanitize(workflowType))
+	dir := filepath.Join(defaultHistoriesDir, sanitize(workflowType))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -211,83 +186,38 @@ func historyFileName(workflowID, runID string) string {
 	return sanitize(workflowID) + "_" + sanitize(runID) + ".json"
 }
 
-// dumpAllHistories writes workflow histories visible to c as JSON into
-// dir/<sanitized workflow type>/<sanitized workflowID>_<sanitized runID>.json.
-//
-// Only executions whose workflow type is in replayTypes (the set registered
-// via RegisterWorkflowForReplay) are dumped. Everything else on the dev
-// server — most notably the stub child-workflow executions served by the
-// dynamic workflow handler — is skipped: those histories are not
-// representative of the real workflow implementation and are never replayed,
-// so writing them would only leave uncleaned files in dir.
-func dumpAllHistories(ctx context.Context, c client.Client, dir string, replayTypes map[string]any, redactWorkerIdentity bool) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func dumpSingleHistory(wfType, wfId string, hist *historypb.History) error {
+
+	// needed to overwrite history, e.g. redact identities
+	marshal := protojson.MarshalOptions{Indent: "  "}
+	raw, err := marshal.Marshal(hist)
+	if err != nil {
 		return err
 	}
-	var nextPageToken []byte
-	marshal := protojson.MarshalOptions{Indent: "  "}
-
-	for {
-		resp, err := c.ListWorkflow(ctx, &workflowservice.ListWorkflowExecutionsRequest{
-			NextPageToken: nextPageToken,
-		})
-		if err != nil {
-			return err
-		}
-		for _, exec := range resp.Executions {
-			wfID := exec.Execution.GetWorkflowId()
-			runID := exec.Execution.GetRunId()
-			workflowType := exec.GetType().GetName()
-			if _, ok := replayTypes[workflowType]; !ok {
-				continue
-			}
-			// generate history events
-			hist := &historypb.History{}
-			iter := c.GetWorkflowHistory(ctx, wfID, runID, false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
-			for iter.HasNext() {
-				ev, err := iter.Next()
-				if err != nil {
-					return err
-				}
-				hist.Events = append(hist.Events, ev)
-			}
-
-			// convert from pb to any since that makes applying certain history
-			// overrides much easier, see how below functions are implemented.
-			raw, err := marshal.Marshal(hist)
-			if err != nil {
-				return err
-			}
-			var value any
-			if err := json.Unmarshal(raw, &value); err != nil {
-				return err
-			}
-			// payloads are base64 encoded which makes it less convenient to
-			// inspect the actual values in the history. This also records a
-			// new field in the history with the decoded value. The replayer
-			// discards unknown fields so it should be ok.
-			//https://github.com/temporalio/sdk-go/blob/35367242edb9e92be90825cd7653ab0046a660d1/internal/internal_worker.go#L2054
-			annotatePayloadData(value)
-			if redactWorkerIdentity {
-				redactWorkerIdentityInHistory(value)
-			}
-			out, err := json.MarshalIndent(value, "", "  ")
-			if err != nil {
-				return err
-			}
-			workflowDir := filepath.Join(dir, sanitize(workflowType))
-			if err := os.MkdirAll(workflowDir, 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(filepath.Join(workflowDir, historyFileName(wfID, runID)), out, 0o600); err != nil {
-				return err
-			}
-		}
-		nextPageToken = resp.NextPageToken
-		if len(nextPageToken) == 0 {
-			return nil
-		}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
 	}
+	// payloads are base64 encoded which makes it less convenient to
+	// inspect the actual values in the history. This also records a
+	// new field in the history with the decoded value. The replayer
+	// discards unknown fields so it should be ok.
+	//https://github.com/temporalio/sdk-go/blob/35367242edb9e92be90825cd7653ab0046a660d1/internal/internal_worker.go#L2054
+	annotatePayloadData(value)
+	out, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	workflowDir := filepath.Join(defaultHistoriesDir, sanitize(wfType))
+	if err := os.MkdirAll(workflowDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(workflowDir, wfId+".json"), out, 0o600); err != nil {
+		return err
+	}
+
+	return nil
+
 }
 
 // redactWorkerIdentityInHistory makes the worker identity in the history

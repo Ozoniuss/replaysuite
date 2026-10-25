@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
+	enumspb "go.temporal.io/api/enums/v1"
+	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
@@ -35,7 +37,11 @@ type TestWorkflowEnvironment struct {
 
 	workflowStubs     map[string][]stubCall
 	workflowStubFnRef map[string]any
+
+	dumpHistory dumpHistoryFn
 }
+
+type dumpHistoryFn func(wfType, wfId string, hist *historypb.History) error
 
 func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
@@ -126,6 +132,23 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	// TODO: maybe the workflow errored somehow on dev server (e.g. missing
 	// activity policy). Figure out what to do there.
 	_ = run.Get(ctx, nil)
+
+	hist := &historypb.History{}
+	iter := e.tclient.GetWorkflowHistory(ctx, run.GetID(), run.GetRunID(), false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
+	for iter.HasNext() {
+		ev, err := iter.Next()
+		if err != nil {
+			return fmt.Errorf("read history: %w", err)
+		}
+		hist.Events = append(hist.Events, ev)
+	}
+
+	wfType, _ := getFunctionName(workflowFn)
+	err = e.dumpHistory(wfType, taskQueue, hist)
+	if err != nil {
+		panic(err)
+	}
+
 	return nil
 }
 
