@@ -41,6 +41,9 @@ type TestWorkflowEnvironment struct {
 	workflowStubFnRef map[string]any
 
 	dumpHistory dumpHistoryFn
+
+	// only populated after execution on dev server completes.
+	workflowHistoryResult *historypb.History
 }
 
 type dumpHistoryFn func(wfType, wfId string, hist *historypb.History) error
@@ -129,6 +132,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	if err != nil {
 		return fmt.Errorf("dump history: %w", err)
 	}
+	e.workflowHistoryResult = hist
 
 	return nil
 }
