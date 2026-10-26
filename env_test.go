@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 	"time"
+	_ "unsafe"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -160,6 +161,20 @@ func (*activityFunctionNameTestActivities) PointerReceiverActivity() error {
 	return nil
 }
 
+// basically making sure to keep this in sync with the SDK since I need it to
+// generate string name identifiers for stubs
+//
+//go:linkname getFunctionNameSDK go.temporal.io/sdk/internal.getFunctionName
+func getFunctionNameSDK(i any) (name string, isMethod bool)
+
+func requireSameAsSDK(t *testing.T, i any, name string, isMethod bool) {
+	t.Helper()
+	sdkName, sdkIsMethod := getFunctionNameSDK(i)
+	if name != sdkName || isMethod != sdkIsMethod {
+		t.Fatalf("got (%q, %v), SDK returns (%q, %v)", name, isMethod, sdkName, sdkIsMethod)
+	}
+}
+
 func TestActivityFunctionName(t *testing.T) {
 	t.Run("string activity name", func(t *testing.T) {
 		// Given
@@ -175,6 +190,7 @@ func TestActivityFunctionName(t *testing.T) {
 		if isMethod {
 			t.Fatal("isMethod = true, want false")
 		}
+		requireSameAsSDK(t, activityName, name, isMethod)
 	})
 
 	t.Run("plain function", func(t *testing.T) {
@@ -191,6 +207,7 @@ func TestActivityFunctionName(t *testing.T) {
 		if isMethod {
 			t.Fatal("isMethod = true, want false")
 		}
+		requireSameAsSDK(t, activityFn, name, isMethod)
 	})
 
 	t.Run("value receiver method value", func(t *testing.T) {
@@ -207,6 +224,7 @@ func TestActivityFunctionName(t *testing.T) {
 		if isMethod {
 			t.Fatal("isMethod = true, want false")
 		}
+		requireSameAsSDK(t, activities.ValueReceiverActivity, name, isMethod)
 	})
 
 	t.Run("pointer receiver method value", func(t *testing.T) {
@@ -223,6 +241,7 @@ func TestActivityFunctionName(t *testing.T) {
 		if !isMethod {
 			t.Fatal("isMethod = false, want true")
 		}
+		requireSameAsSDK(t, activities.PointerReceiverActivity, name, isMethod)
 	})
 
 	t.Run("nil pointer receiver method value", func(t *testing.T) {
@@ -239,6 +258,26 @@ func TestActivityFunctionName(t *testing.T) {
 		if !isMethod {
 			t.Fatal("isMethod = false, want true")
 		}
+		requireSameAsSDK(t, activities.PointerReceiverActivity, name, isMethod)
+	})
+
+	t.Run("anonymous function", func(t *testing.T) {
+		// Given
+		activityFn := func() error {
+			return nil
+		}
+
+		// When
+		name, isMethod := getFunctionName(activityFn)
+
+		// Then
+		if name != "1" {
+			t.Fatalf("name = %q, want %q", name, "1")
+		}
+		if isMethod {
+			t.Fatal("isMethod = true, want false")
+		}
+		requireSameAsSDK(t, activityFn, name, isMethod)
 	})
 }
 
