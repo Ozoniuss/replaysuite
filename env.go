@@ -46,6 +46,9 @@ type TestWorkflowEnvironment struct {
 
 	// only populated after execution on dev server completes.
 	workflowHistoryResult *historypb.History
+
+	// all workflows and activities on the dev server will use this task queue
+	taskQueue string
 }
 
 type dumpHistoryFn func(wfType, wfId string, hist *historypb.History) error
@@ -89,11 +92,13 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if e.taskQueue == "" {
+		e.taskQueue = uuid.NewString()
+	}
 	// Start a new worker for each executed workflow. If this becomes expensive,
 	// it may be a good idea to use shared workers.
-	taskQueue := "replaysuite-" + uuid.NewString()
-	w := worker.New(e.tclient, taskQueue, worker.Options{
-		Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{taskQueue: taskQueue}},
+	w := worker.New(e.tclient, e.taskQueue, worker.Options{
+		Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{taskQueue: e.taskQueue}},
 	})
 	if _, ok := workflowFn.(string); !ok {
 		w.RegisterWorkflow(workflowFn)
@@ -109,8 +114,8 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	defer w.Stop()
 
 	run, err := e.tclient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		ID:        taskQueue,
-		TaskQueue: taskQueue,
+		ID:        e.taskQueue,
+		TaskQueue: e.taskQueue,
 	}, workflowFn, args...)
 	if err != nil {
 		return fmt.Errorf("execute workflow: %w", err)
@@ -135,7 +140,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 
 	wfType, _ := getFunctionName(workflowFn)
-	err = e.dumpHistory(wfType, taskQueue, hist)
+	err = e.dumpHistory(wfType, e.taskQueue, hist)
 	if err != nil {
 		return fmt.Errorf("dump history: %w", err)
 	}
