@@ -113,8 +113,9 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 	defer w.Stop()
 
+	wfID := uuid.NewString()
 	run, err := e.tclient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		ID:        e.taskQueue,
+		ID:        wfID,
 		TaskQueue: e.taskQueue,
 	}, workflowFn, args...)
 	if err != nil {
@@ -140,7 +141,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 
 	wfType, _ := getFunctionName(workflowFn)
-	err = e.dumpHistory(wfType, e.taskQueue, hist)
+	err = e.dumpHistory(wfType, wfID, hist)
 	if err != nil {
 		return fmt.Errorf("dump history: %w", err)
 	}
