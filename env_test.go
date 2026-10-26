@@ -77,15 +77,237 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestEnvironment(t *testing.T) {
+func ActivitySimpleFlow(ctx context.Context) error {
+	name := activity.GetInfo(ctx).ActivityType.Name
+	activity.GetLogger(ctx).Info(name)
+	return nil
+}
+func WorkflowSimpleFlow(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, ActivitySimpleFlow).Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	return nil
+}
+
+func TestEnvironment_SimpleFlow(t *testing.T) {
+
+	testworker.RegisterWorkflow(WorkflowSimpleFlow)
+	testworker.RegisterActivity(ActivitySimpleFlow)
+	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
+		ID:        "Test Simple Flow",
+		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
+	}, WorkflowSimpleFlow)
+	require.Nil(t, err)
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.OnActivity(ActivitySimpleFlow, mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowSimpleFlow)
+	require.True(t, env.IsWorkflowCompleted())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	// This is the name inferred for anonymous functions.
+	require.Equal(t, "WorkflowSimpleFlow", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ActivitySimpleFlow", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+type ActivitiesStructFlow struct{}
+
+func (a *ActivitiesStructFlow) ActivityStructFlow(ctx context.Context) error {
+	name := activity.GetInfo(ctx).ActivityType.Name
+	activity.GetLogger(ctx).Info(name)
+	return nil
+}
+func WorkflowStructFlow(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var a *ActivitiesStructFlow
+	if err := workflow.ExecuteActivity(ctx, a.ActivityStructFlow).Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	return nil
+}
+
+func TestEnvironment_StructFlow(t *testing.T) {
+
+	var a *ActivitiesStructFlow
+	testworker.RegisterWorkflow(WorkflowStructFlow)
+	testworker.RegisterActivity(&ActivitiesStructFlow{})
+	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
+		ID:        "Test Struct Flow",
+		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
+	}, WorkflowStructFlow)
+	require.Nil(t, err)
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.OnActivity(a.ActivityStructFlow, mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowStructFlow)
+	require.True(t, env.IsWorkflowCompleted())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowStructFlow", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ActivityStructFlow", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+const NamedActivityName = "NamedActivity"
+
+func WorkflowNamedActivity(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, NamedActivityName).Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	return nil
+}
+
+func TestEnvironment_NamedActivity(t *testing.T) {
 
 	Activity := func(ctx context.Context) error {
-		activity.GetLogger(ctx).Info("Activity")
+		name := activity.GetInfo(ctx).ActivityType.Name
+		activity.GetLogger(ctx).Info(name)
+		return nil
+	}
+
+	testworker.RegisterWorkflow(WorkflowNamedActivity)
+	testworker.RegisterActivityWithOptions(Activity, activity.RegisterOptions{Name: NamedActivityName})
+	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
+		ID:        "Test Named Activity",
+		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
+	}, WorkflowNamedActivity)
+	require.Nil(t, err)
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.RegisterActivityWithOptions(Activity, activity.RegisterOptions{Name: NamedActivityName})
+	env.OnActivity(NamedActivityName, mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowNamedActivity)
+	require.True(t, env.IsWorkflowCompleted())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowNamedActivity", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, NamedActivityName, hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+func TestEnvironment_NamesAsClosures(t *testing.T) {
+
+	Activity := func(ctx context.Context) error {
+		activity.GetLogger(ctx).Info("ActivityNamesAsClosures")
 		return nil
 	}
 	Workflow := func(ctx workflow.Context) error {
 		logger := workflow.GetLogger(ctx)
-		logger.Info("Workflow")
+		logger.Info("WorkflowNamesAsClosures")
 
 		ctx = workflow.WithActivityOptions(
 			ctx, workflow.ActivityOptions{
@@ -94,7 +316,7 @@ func TestEnvironment(t *testing.T) {
 		)
 
 		if err := workflow.ExecuteActivity(ctx, Activity).Get(ctx, nil); err != nil {
-			logger.Error("GreetActivity failed.", "Error", err)
+			logger.Error("Activity execution failed.", "Error", err)
 			return err
 		}
 		return nil
@@ -103,7 +325,7 @@ func TestEnvironment(t *testing.T) {
 	testworker.RegisterWorkflow(Workflow)
 	testworker.RegisterActivity(Activity)
 	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
-		ID:        "Test 1",
+		ID:        "Test Names as Closures",
 		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
 	}, Workflow)
 	require.Nil(t, err)

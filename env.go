@@ -2,6 +2,7 @@ package replaysuite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -16,6 +17,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/interceptor"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -115,7 +117,12 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 	// TODO: maybe the workflow errored somehow on dev server (e.g. missing
 	// activity policy). Figure out what to do there.
-	_ = run.Get(ctx, nil)
+	if err := run.Get(ctx, nil); err != nil {
+		var appErr *temporal.ApplicationError
+		if errors.As(err, &appErr) && appErr.Type() == internalErrorType {
+			return fmt.Errorf("workflow failed due to replaysuite error: %w", err)
+		}
+	}
 
 	hist := &historypb.History{}
 	iter := e.tclient.GetWorkflowHistory(ctx, run.GetID(), run.GetRunID(), false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
@@ -144,17 +151,17 @@ func (env *TestWorkflowEnvironment) dynamicActivityHandler(ctx context.Context, 
 
 	stubFn, ok := env.activityStubFnRef[actName]
 	if !ok {
-		return nil, fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID)
+		return nil, internalError(fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID))
 	}
 
 	callArgs, err := decodePayloadsViaFnType(ctx, payloads, stubFn)
 	if err != nil {
-		return nil, fmt.Errorf("decode payloads for %s: %w", actName, err)
+		return nil, internalError(fmt.Errorf("decode payloads for %s: %w", actName, err))
 	}
 
 	rets, err := methodCalled(&env.activityMock, actName, callArgs)
 	if err != nil {
-		return nil, fmt.Errorf("replaysuite: activity %s: %w", actName, err)
+		return nil, internalError(fmt.Errorf("replaysuite: activity %s: %w", actName, err))
 	}
 	return extractReturn(rets)
 }
@@ -163,26 +170,34 @@ func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context,
 	info := workflow.GetInfo(ctx)
 	wfType := info.WorkflowType.Name
 
+	// note that we return internalError so that it's clear if the dev server
+	// failed unexpectedly.
 	parent := info.ParentWorkflowExecution
 	if parent == nil {
-		return nil, fmt.Errorf("replaysuite: workflow %s has no parent; only mocked child workflows are served by the dynamic handler", wfType)
+		return nil, internalError(fmt.Errorf("replaysuite: workflow %s has no parent; only mocked child workflows are served by the dynamic handler", wfType))
 	}
 
 	stubFn, ok := env.workflowStubFnRef[wfType]
 	if !ok {
-		return nil, fmt.Errorf("replaysuite: no OnWorkflow stub for child workflow %s in workflow %s", wfType, parent.ID)
+		return nil, internalError(fmt.Errorf("replaysuite: no OnWorkflow stub for child workflow %s in workflow %s", wfType, parent.ID))
 	}
 
 	callArgs, err := decodePayloadsViaFnType(ctx, payloads, stubFn)
 	if err != nil {
-		return nil, fmt.Errorf("decode payloads for child workflow %s: %w", wfType, err)
+		return nil, internalError(fmt.Errorf("decode payloads for child workflow %s: %w", wfType, err))
 	}
 
 	rets, err := methodCalled(&env.workflowMock, wfType, callArgs)
 	if err != nil {
-		return nil, fmt.Errorf("replaysuite: child workflow %s: %w", wfType, err)
+		return nil, internalError(fmt.Errorf("replaysuite: child workflow %s: %w", wfType, err))
 	}
 	return extractReturn(rets)
+}
+
+const internalErrorType = "ReplaySuiteInternalError"
+
+func internalError(err error) error {
+	return temporal.NewNonRetryableApplicationError(err.Error(), internalErrorType, err)
 }
 
 // methodCalled reports a call to m. Without a TestingT, testify panics on
