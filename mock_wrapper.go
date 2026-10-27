@@ -1,6 +1,7 @@
 package replaysuite
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -33,7 +34,11 @@ func (m *MockCallWrapper) Times(i int) *MockCallWrapper {
 }
 
 func (m *MockCallWrapper) Never() *MockCallWrapper {
-	panic("unsupported yet")
+	// replicate sdk implementation
+	m.call.Maybe()
+	m.call.Panic(fmt.Sprintf("unexpected call: %s(%s)", m.call.Method, m.call.Arguments.String()))
+	m.inner.Never()
+	return m
 }
 
 func (m *MockCallWrapper) Maybe() *MockCallWrapper {

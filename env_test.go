@@ -15,6 +15,8 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	tclient "go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -80,6 +82,8 @@ func TestMain(m *testing.M) {
 
 	os.Exit(code)
 }
+
+// === Test for a simple workflow with one activity
 
 func ActivitySimpleFlow(ctx context.Context) error {
 	name := activity.GetInfo(ctx).ActivityType.Name
@@ -152,6 +156,244 @@ func TestEnvironment_SimpleFlow(t *testing.T) {
 	// This is the name inferred for anonymous functions.
 	require.Equal(t, "WorkflowSimpleFlow", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 	require.Equal(t, "ActivitySimpleFlow", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Test that activity arguments coming from mocks reach the dev server (it
+// doesn't matter for history but it matters for workflow execution e.g.
+// branching logic)
+
+func ActivityWithArgs(ctx context.Context, name string, count int) (string, error) {
+	return fmt.Sprintf("real:%s:%d", name, count), nil
+}
+func WorkflowWithArgs(ctx workflow.Context, name string, count int) (string, error) {
+	logger := workflow.GetLogger(ctx)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var result string
+	if err := workflow.ExecuteActivity(ctx, ActivityWithArgs, name, count).Get(ctx, &result); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return "", err
+	}
+	return result, nil
+}
+
+func TestEnvironment_WithArgs(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.OnActivity(ActivityWithArgs, mock.Anything, "alice", 3).Return("mocked:alice:3", nil)
+
+	env.ExecuteWorkflow(WorkflowWithArgs, "alice", 3)
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "mocked:alice:3", envResult)
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowWithArgs", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ActivityWithArgs", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+
+	dc := converter.GetDefaultDataConverter()
+
+	var wfName string
+	var wfCount int
+	require.NoError(t, dc.FromPayloads(hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetInput(), &wfName, &wfCount))
+	require.Equal(t, "alice", wfName)
+	require.Equal(t, 3, wfCount)
+
+	var actName string
+	var actCount int
+	require.NoError(t, dc.FromPayloads(hist.Events[4].GetActivityTaskScheduledEventAttributes().GetInput(), &actName, &actCount))
+	require.Equal(t, "alice", actName)
+	require.Equal(t, 3, actCount)
+
+	var actResult string
+	require.NoError(t, dc.FromPayloads(hist.Events[6].GetActivityTaskCompletedEventAttributes().GetResult(), &actResult))
+	require.Equal(t, "mocked:alice:3", actResult)
+
+	var wfResult string
+	require.NoError(t, dc.FromPayloads(hist.Events[10].GetWorkflowExecutionCompletedEventAttributes().GetResult(), &wfResult))
+	require.Equal(t, "mocked:alice:3", wfResult)
+}
+
+// === Test that activity arguments on reach the server when activties are
+// supposed to run as expected.
+
+func TestEnvironment_WithArgsNotMocked(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.RegisterActivity(ActivityWithArgs)
+
+	env.ExecuteWorkflow(WorkflowWithArgs, "alice", 3)
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "real:alice:3", envResult)
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowWithArgs", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ActivityWithArgs", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+
+	dc := converter.GetDefaultDataConverter()
+
+	var wfName string
+	var wfCount int
+	require.NoError(t, dc.FromPayloads(hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetInput(), &wfName, &wfCount))
+	require.Equal(t, "alice", wfName)
+	require.Equal(t, 3, wfCount)
+
+	var actName string
+	var actCount int
+	require.NoError(t, dc.FromPayloads(hist.Events[4].GetActivityTaskScheduledEventAttributes().GetInput(), &actName, &actCount))
+	require.Equal(t, "alice", actName)
+	require.Equal(t, 3, actCount)
+
+	var actResult string
+	require.NoError(t, dc.FromPayloads(hist.Events[6].GetActivityTaskCompletedEventAttributes().GetResult(), &actResult))
+	require.Equal(t, "real:alice:3", actResult)
+
+	var wfResult string
+	require.NoError(t, dc.FromPayloads(hist.Events[10].GetWorkflowExecutionCompletedEventAttributes().GetResult(), &wfResult))
+	require.Equal(t, "real:alice:3", wfResult)
+}
+
+// === Test that a mocked activity error drives the workflow logic on the dev
+// server, so the second activity is never scheduled.
+
+func ActivityBranchingFirst(ctx context.Context) error {
+	return nil
+}
+func ActivityBranchingSecond(ctx context.Context) error {
+	return nil
+}
+func WorkflowBranching(ctx workflow.Context) error {
+	logger := workflow.GetLogger(ctx)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, ActivityBranchingFirst).Get(ctx, nil); err != nil {
+		logger.Error("First activity failed, skipping the second one.", "Error", err)
+		return err
+	}
+	if err := workflow.ExecuteActivity(ctx, ActivityBranchingSecond).Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	return nil
+}
+
+func TestEnvironment_Branching(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.OnActivity(ActivityBranchingFirst, mock.Anything).Return(
+		temporal.NewNonRetryableApplicationError("first failed", "BranchingError", nil),
+	)
+	env.OnActivity(ActivityBranchingSecond, mock.Anything).Return(nil).Never()
+
+	env.ExecuteWorkflow(WorkflowBranching)
+	require.True(t, env.IsWorkflowCompleted())
+	require.ErrorContains(t, env.GetWorkflowError(), "first failed")
+
+	// The second activity is called neither in the test environment nor on the
+	// dev server.
+	env.AssertActivityNotCalled(t, "ActivityBranchingSecond", mock.Anything)
+	env.activityMock.AssertNotCalled(t, "ActivityBranchingSecond", mock.Anything)
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_FAILED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowBranching", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ActivityBranchingFirst", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "first failed", hist.Events[6].GetActivityTaskFailedEventAttributes().GetFailure().GetMessage())
 }
 
 // === Test that regular registration with no mock will run the actual activity
@@ -323,6 +565,8 @@ func WorkflowStructFlow(ctx workflow.Context) error {
 	return nil
 }
 
+// === Test that it works properly with a struct registration.
+
 func TestEnvironment_StructFlow(t *testing.T) {
 
 	var a *ActivitiesStructFlow
@@ -370,6 +614,106 @@ func TestEnvironment_StructFlow(t *testing.T) {
 
 	require.Equal(t, "WorkflowStructFlow", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 	require.Equal(t, "ActivityStructFlow", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Test that mocking one method of a registered struct leaves the other
+// methods running the real implementation.
+
+var structPartiallyMockedMockedCalls atomic.Int32
+var structPartiallyMockedRealCalls atomic.Int32
+
+type ActivitiesStructPartiallyMocked struct{}
+
+func (a *ActivitiesStructPartiallyMocked) MockedActivityStructPartiallyMocked(ctx context.Context) error {
+	structPartiallyMockedMockedCalls.Add(1)
+	name := activity.GetInfo(ctx).ActivityType.Name
+	activity.GetLogger(ctx).Info(name)
+	return nil
+}
+
+func (a *ActivitiesStructPartiallyMocked) RealActivityStructPartiallyMocked(ctx context.Context) error {
+	structPartiallyMockedRealCalls.Add(1)
+	name := activity.GetInfo(ctx).ActivityType.Name
+	activity.GetLogger(ctx).Info(name)
+	return nil
+}
+
+func WorkflowStructPartiallyMocked(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var a *ActivitiesStructPartiallyMocked
+	if err := workflow.ExecuteActivity(ctx, a.MockedActivityStructPartiallyMocked).Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	if err := workflow.ExecuteActivity(ctx, a.RealActivityStructPartiallyMocked).Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	return nil
+}
+
+func TestEnvironment_StructPartiallyMocked(t *testing.T) {
+
+	var a *ActivitiesStructPartiallyMocked
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.RegisterActivity(&ActivitiesStructPartiallyMocked{})
+	env.OnActivity(a.MockedActivityStructPartiallyMocked, mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowStructPartiallyMocked)
+	require.True(t, env.IsWorkflowCompleted())
+
+	// The mocked method never runs, the other one runs once in the test
+	// environment and once on the dev server.
+	require.Equal(t, int32(0), structPartiallyMockedMockedCalls.Load())
+	require.Equal(t, int32(2), structPartiallyMockedRealCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowStructPartiallyMocked", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "MockedActivityStructPartiallyMocked", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "RealActivityStructPartiallyMocked", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 }
 
 const NamedActivityName = "NamedActivity"
