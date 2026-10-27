@@ -49,6 +49,8 @@ type TestWorkflowEnvironment struct {
 
 	// all workflows and activities on the dev server will use this task queue
 	taskQueue string
+
+	w worker.Worker
 }
 
 type dumpHistoryFn func(wfType, wfId string, hist *historypb.History) error
@@ -60,7 +62,27 @@ func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 		panic(fmt.Sprintf("[replaysuite] dev-server mirror failed: %v", err))
 	}
 }
+
+func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
+	e.TestWorkflowEnvironment.RegisterActivity(a)
+	e.worker().RegisterActivityWithOptions(a, activity.RegisterOptions{
+		DisableAlreadyRegisteredCheck: true,
+	})
+}
+
+func (e *TestWorkflowEnvironment) RegisterActivityWithOptions(a any, options activity.RegisterOptions) {
+	e.TestWorkflowEnvironment.RegisterActivityWithOptions(a, options)
+	options.DisableAlreadyRegisteredCheck = true
+	e.worker().RegisterActivityWithOptions(a, options)
+}
+
 func (e *TestWorkflowEnvironment) OnActivity(activityFn any, args ...any) *MockCallWrapper {
+
+	w := e.worker()
+	// mirror what test suite does, so calling this twice doesn't panic
+	w.RegisterActivityWithOptions(activityFn, activity.RegisterOptions{
+		DisableAlreadyRegisteredCheck: true,
+	})
 
 	name, _ := getFunctionName(activityFn)
 
@@ -88,25 +110,35 @@ func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockC
 	}
 }
 
+func (e *TestWorkflowEnvironment) worker() worker.Worker {
+	// lazily initialize the worker to support activity registration
+	if e.w == nil {
+		e.w = worker.New(e.tclient, e.getTaskQueue(), worker.Options{
+			Interceptors: []interceptor.WorkerInterceptor{
+				&fastReplayInterceptor{taskQueue: e.getTaskQueue()},
+				&mockActivityInterceptor{
+					mock:    &e.activityMock,
+					stubFns: e.activityStubFnRef,
+				}},
+		})
+	}
+	return e.w
+}
+
 func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if e.taskQueue == "" {
-		e.taskQueue = uuid.NewString()
-	}
 	// Start a new worker for each executed workflow. If this becomes expensive,
 	// it may be a good idea to use shared workers.
-	w := worker.New(e.tclient, e.taskQueue, worker.Options{
-		Interceptors: []interceptor.WorkerInterceptor{&fastReplayInterceptor{taskQueue: e.taskQueue}},
-	})
+	w := e.worker()
 	if _, ok := workflowFn.(string); !ok {
 		w.RegisterWorkflow(workflowFn)
 	}
 
 	// run mocked code
 	// todo: handle actual activities
-	w.RegisterDynamicActivity(e.dynamicActivityHandler, activity.DynamicRegisterOptions{})
+	// w.RegisterDynamicActivity(e.dynamicActivityHandler, activity.DynamicRegisterOptions{})
 	w.RegisterDynamicWorkflow(e.dynamicWorkflowHandler, workflow.DynamicRegisterOptions{})
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("start worker: %w", err)
@@ -116,7 +148,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	wfID := uuid.NewString()
 	run, err := e.tclient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        wfID,
-		TaskQueue: e.taskQueue,
+		TaskQueue: e.getTaskQueue(),
 	}, workflowFn, args...)
 	if err != nil {
 		return fmt.Errorf("execute workflow: %w", err)
@@ -200,6 +232,13 @@ func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context,
 	return extractReturn(rets)
 }
 
+func (env *TestWorkflowEnvironment) getTaskQueue() string {
+	if env.taskQueue == "" {
+		env.taskQueue = uuid.NewString()
+	}
+	return env.taskQueue
+}
+
 const internalErrorType = "ReplaySuiteInternalError"
 
 func internalError(err error) error {
@@ -255,29 +294,6 @@ func decodePayloadsViaFnType(ctx any, payloads converter.EncodedValues, fn any) 
 		out = append(out, v.Elem().Interface())
 	}
 	return out, nil
-}
-
-func extractReturn(rets []any) (any, error) {
-	switch len(rets) {
-	case 0:
-		return nil, nil
-	case 1:
-		if rets[0] == nil {
-			return nil, nil
-		}
-		if e, ok := rets[0].(error); ok {
-			return nil, e
-		}
-		return rets[0], nil
-	default:
-		var err error
-		if rets[1] != nil {
-			if e, ok := rets[1].(error); ok {
-				err = e
-			}
-		}
-		return rets[0], err
-	}
 }
 
 // getFunctionName is a straight copy from what Go SDK does.
