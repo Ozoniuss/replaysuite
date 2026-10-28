@@ -716,6 +716,194 @@ func TestEnvironment_StructPartiallyMocked(t *testing.T) {
 	require.Equal(t, "RealActivityStructPartiallyMocked", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 }
 
+// === Test that timers are recorded as events on the dev server. Also using
+// a long timer duration to show that it's overwritten to a neglijible one
+
+func WorkflowTimer(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	return workflow.NewTimer(ctx, 1*time.Hour).Get(ctx, nil)
+}
+
+func TestEnvironment_Timer(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+
+	env.ExecuteWorkflow(WorkflowTimer)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_TIMER_STARTED,
+		enumspb.EVENT_TYPE_TIMER_FIRED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowTimer", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	// check that the interceptor did override
+	require.Equal(t, shortRetryInterval, hist.Events[4].GetTimerStartedEventAttributes().GetStartToFireTimeout().AsDuration())
+}
+
+// === Test that sleeps are recorded as timer events on the dev server.
+
+func WorkflowSleep(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	return workflow.Sleep(ctx, 1*time.Hour)
+}
+
+func TestEnvironment_Sleep(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+
+	env.ExecuteWorkflow(WorkflowSleep)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_TIMER_STARTED,
+		enumspb.EVENT_TYPE_TIMER_FIRED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowSleep", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, shortRetryInterval, hist.Events[4].GetTimerStartedEventAttributes().GetStartToFireTimeout().AsDuration())
+}
+
+// === Test that zero timers are not recorded as events on the dev server. This
+// I think is specific to the Go SDK and means changing a timer's duration from
+// a positive number to zero will cause NDE.
+
+func WorkflowZeroTimer(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	return workflow.NewTimer(ctx, 0).Get(ctx, nil)
+}
+
+func TestEnvironment_ZeroTimer(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+
+	env.ExecuteWorkflow(WorkflowZeroTimer)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowZeroTimer", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+}
+
+// === Same as above but with sleep.
+
+func WorkflowZeroSleep(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	return workflow.Sleep(ctx, 0)
+}
+
+func TestEnvironment_ZeroSleep(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+
+	env.ExecuteWorkflow(WorkflowZeroSleep)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowZeroSleep", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+}
+
 const NamedActivityName = "NamedActivity"
 
 func WorkflowNamedActivity(ctx workflow.Context) error {
