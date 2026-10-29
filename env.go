@@ -42,6 +42,11 @@ type TestWorkflowEnvironment struct {
 
 	actMocked map[string]struct{}
 
+	// keep track of activities registered under an alias that may have a
+	// different name from their actual name. the activity type is actually
+	// the alias there. this is also what the sdk does.
+	actAliasRef map[string]string
+
 	dumpHistory dumpHistoryFn
 
 	// only populated after execution on dev server completes.
@@ -75,10 +80,11 @@ func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
 func (e *TestWorkflowEnvironment) RegisterActivityWithOptions(a any, options activity.RegisterOptions) {
 	e.TestWorkflowEnvironment.RegisterActivityWithOptions(a, options)
 	options.DisableAlreadyRegisteredCheck = true
+	name, _ := getFunctionName(a)
 	if options.Name != "" {
 		e.actSignRef[options.Name] = a
+		e.actAliasRef[name] = options.Name
 	} else {
-		name, _ := getFunctionName(a)
 		e.actSignRef[name] = a
 	}
 	e.worker().RegisterActivityWithOptions(a, options)
@@ -97,6 +103,10 @@ func (e *TestWorkflowEnvironment) OnActivity(activityFnOrString any, args ...any
 			DisableAlreadyRegisteredCheck: true,
 		})
 		name, _ := getFunctionName(activityFnOrString)
+		if alias, ok := e.actAliasRef[name]; ok {
+			name = alias
+		}
+		// the signature reference will always use the alias if there is one
 		e.actSignRef[name] = activityFnOrString
 		aname = name
 	} else {

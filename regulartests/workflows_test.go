@@ -243,6 +243,32 @@ func Test_Workflow_CanMockWithFuncEvenWhenRegisteringAsString(t *testing.T) {
 	require.Equal(t, 0, ret)
 }
 
+func Test_Workflow_MockingFuncRegisteredWithCustomNameMocksCustomName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterActivityWithOptions(EchoName, activity.RegisterOptions{
+		Name: "AliasedEchoName",
+	})
+
+	env.OnActivity(EchoName, mock.Anything, Branch1Word).Return("Other word", nil)
+	env.OnActivity(GoesToBranch1Activity, mock.Anything).Return()
+	env.OnActivity(GoesToBranch2Activity, mock.Anything).Return()
+
+	env.ExecuteWorkflow(Workflow, Branch1Word)
+
+	time.Sleep(1 * time.Second)
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result BranchResult
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, 0, result.B1cnt)
+	assert.Equal(t, 10, result.B2cnt)
+	env.AssertActivityNumberOfCalls(t, "AliasedEchoName", 10)
+	env.AssertActivityNotCalled(t, "EchoName", mock.Anything, mock.Anything)
+}
+
 // need a registration first if I use a named activity
 
 func Test_Workflow_CannotMockViaStringIfNotRegistered(t *testing.T) {

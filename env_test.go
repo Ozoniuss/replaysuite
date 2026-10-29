@@ -92,6 +92,7 @@ func newTestEnv(s testsuite.WorkflowTestSuite) TestWorkflowEnvironment {
 		actSignRef:              map[string]any{},
 		wfSignRef:               map[string]any{},
 		actMocked:               map[string]struct{}{},
+		actAliasRef:             map[string]string{},
 	}
 }
 
@@ -632,6 +633,80 @@ func TestEnvironment_MockOverwritesRegular(t *testing.T) {
 
 	require.Equal(t, "WorkflowMockOverwritesRegular", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 	require.Equal(t, "ActivityMockOverwritesRegular", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Test that mocking a function registered with a custom name mocks the
+// custom name instead of the real activity (and that in the history the
+// alias shows up as the type)
+
+const AliasedRegistrationActivityName = "AliasedRegistration"
+
+var aliasedRegistrationCalls atomic.Int32
+
+func ActivityAliasedRegistration(ctx context.Context) (string, error) {
+	aliasedRegistrationCalls.Add(1)
+	return "real", nil
+}
+func WorkflowAliasedRegistration(ctx workflow.Context) (string, error) {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var result string
+	if err := workflow.ExecuteActivity(ctx, ActivityAliasedRegistration).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func TestEnvironment_AliasedRegistrationMocked(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivityWithOptions(ActivityAliasedRegistration, activity.RegisterOptions{
+		Name: AliasedRegistrationActivityName,
+	})
+	env.OnActivity(ActivityAliasedRegistration, mock.Anything).Return("mocked", nil)
+
+	env.ExecuteWorkflow(WorkflowAliasedRegistration)
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "mocked", envResult)
+
+	// The mock runs instead of the real activity, in both places.
+	require.Equal(t, int32(0), aliasedRegistrationCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowAliasedRegistration", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, AliasedRegistrationActivityName, hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+
+	var actResult string
+	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[6].GetActivityTaskCompletedEventAttributes().GetResult(), &actResult))
+	require.Equal(t, "mocked", actResult)
 }
 
 // === Makes sure that using a named registration without an OnActivity mock
