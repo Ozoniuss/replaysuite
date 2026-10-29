@@ -946,6 +946,276 @@ func TestEnvironment_StructPartiallyMocked(t *testing.T) {
 	require.Equal(t, "RealActivityStructPartiallyMocked", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 }
 
+// === Test that all methods of a registered struct run the real implementation
+// when nothing is mocked.
+
+var structRegisteredFirstCalls atomic.Int32
+var structRegisteredSecondCalls atomic.Int32
+
+type ActivitiesStructRegistered struct{}
+
+func (a *ActivitiesStructRegistered) FirstActivityStructRegistered(ctx context.Context) error {
+	structRegisteredFirstCalls.Add(1)
+	return nil
+}
+
+func (a *ActivitiesStructRegistered) SecondActivityStructRegistered(ctx context.Context) error {
+	structRegisteredSecondCalls.Add(1)
+	return nil
+}
+
+func WorkflowStructRegistered(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var a *ActivitiesStructRegistered
+	if err := workflow.ExecuteActivity(ctx, a.FirstActivityStructRegistered).Get(ctx, nil); err != nil {
+		return err
+	}
+	return workflow.ExecuteActivity(ctx, a.SecondActivityStructRegistered).Get(ctx, nil)
+}
+
+func TestEnvironment_StructRegistered(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivity(&ActivitiesStructRegistered{})
+
+	env.ExecuteWorkflow(WorkflowStructRegistered)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	// Both methods run once in the test environment and once on the dev server.
+	require.Equal(t, int32(2), structRegisteredFirstCalls.Load())
+	require.Equal(t, int32(2), structRegisteredSecondCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowStructRegistered", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "FirstActivityStructRegistered", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "SecondActivityStructRegistered", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Test regular structs, with aliasing. This aliasing thing has given me so
+// many fucking headaches, it's really annoying that it needs to support aliased
+// registrations in test suite.
+
+const StructAliasedPrefix = "Aliased"
+
+var structAliasedFirstCalls atomic.Int32
+var structAliasedSecondCalls atomic.Int32
+
+type ActivitiesStructAliased struct{}
+
+func (a *ActivitiesStructAliased) FirstActivityStructAliased(ctx context.Context) error {
+	structAliasedFirstCalls.Add(1)
+	return nil
+}
+
+func (a *ActivitiesStructAliased) SecondActivityStructAliased(ctx context.Context) error {
+	structAliasedSecondCalls.Add(1)
+	return nil
+}
+
+func WorkflowStructAliased(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, StructAliasedPrefix+"FirstActivityStructAliased").Get(ctx, nil); err != nil {
+		return err
+	}
+	return workflow.ExecuteActivity(ctx, StructAliasedPrefix+"SecondActivityStructAliased").Get(ctx, nil)
+}
+
+func TestEnvironment_StructAliased(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivityWithOptions(&ActivitiesStructAliased{}, activity.RegisterOptions{
+		Name: StructAliasedPrefix,
+	})
+
+	env.ExecuteWorkflow(WorkflowStructAliased)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	// Both methods run once in the test environment and once on the dev server.
+	require.Equal(t, int32(2), structAliasedFirstCalls.Load())
+	require.Equal(t, int32(2), structAliasedSecondCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	// The activity type recorded in the history is the prefixed name.
+	require.Equal(t, "WorkflowStructAliased", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "AliasedFirstActivityStructAliased", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "AliasedSecondActivityStructAliased", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Test that methods of a registered struct can be mocked by name, which
+// is just the method name.
+
+var structViaNameMockedCalls atomic.Int32
+var structViaNameRealCalls atomic.Int32
+
+type ActivitiesStructViaName struct{}
+
+func (a *ActivitiesStructViaName) MockedActivityStructViaName(ctx context.Context) error {
+	structViaNameMockedCalls.Add(1)
+	return nil
+}
+
+func (a *ActivitiesStructViaName) RealActivityStructViaName(ctx context.Context) error {
+	structViaNameRealCalls.Add(1)
+	return nil
+}
+
+func WorkflowStructViaName(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var a *ActivitiesStructViaName
+	if err := workflow.ExecuteActivity(ctx, a.MockedActivityStructViaName).Get(ctx, nil); err != nil {
+		return err
+	}
+	return workflow.ExecuteActivity(ctx, a.RealActivityStructViaName).Get(ctx, nil)
+}
+
+func TestEnvironment_StructMockedViaName(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivity(&ActivitiesStructViaName{})
+	env.OnActivity("MockedActivityStructViaName", mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowStructViaName)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	// The mocked method never runs, the other one runs once in the test
+	// environment and once on the dev server.
+	require.Equal(t, int32(0), structViaNameMockedCalls.Load())
+	require.Equal(t, int32(2), structViaNameRealCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+	require.Equal(t, "MockedActivityStructViaName", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "RealActivityStructViaName", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Test that the name used when registering a struct is a prefix for all
+// its methods. These can only be called by their string name.
+
+const StructPrefix = "Prefix"
+
+var structPrefixedMockedCalls atomic.Int32
+var structPrefixedRealCalls atomic.Int32
+
+type ActivitiesStructPrefixed struct{}
+
+func (a *ActivitiesStructPrefixed) MockedActivityStructPrefixed(ctx context.Context) error {
+	structPrefixedMockedCalls.Add(1)
+	return nil
+}
+
+func (a *ActivitiesStructPrefixed) RealActivityStructPrefixed(ctx context.Context) error {
+	structPrefixedRealCalls.Add(1)
+	return nil
+}
+
+func WorkflowStructPrefixed(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, StructPrefix+"MockedActivityStructPrefixed").Get(ctx, nil); err != nil {
+		return err
+	}
+	return workflow.ExecuteActivity(ctx, StructPrefix+"RealActivityStructPrefixed").Get(ctx, nil)
+}
+
+func TestEnvironment_StructRegisteredWithPrefix(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivityWithOptions(&ActivitiesStructPrefixed{}, activity.RegisterOptions{
+		Name: StructPrefix,
+	})
+	env.OnActivity(StructPrefix+"MockedActivityStructPrefixed", mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowStructPrefixed)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	require.Equal(t, int32(0), structPrefixedMockedCalls.Load())
+	require.Equal(t, int32(2), structPrefixedRealCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+	require.Equal(t, StructPrefix+"MockedActivityStructPrefixed", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, StructPrefix+"RealActivityStructPrefixed", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
 // === Test that timers are recorded as events on the dev server. Also using
 // a long timer duration to show that it's overwritten to a neglijible one
 
