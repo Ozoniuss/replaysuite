@@ -3,6 +3,7 @@ package replaysuite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -394,6 +395,136 @@ func TestEnvironment_Branching(t *testing.T) {
 	require.Equal(t, "WorkflowBranching", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 	require.Equal(t, "ActivityBranchingFirst", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 	require.Equal(t, "first failed", hist.Events[6].GetActivityTaskFailedEventAttributes().GetFailure().GetMessage())
+}
+
+// === Test a failed activity, plus that its retry policy is overridden and there
+// aren't plenty of retries making the test slow.
+
+func ActivityFailed(ctx context.Context) error {
+	return nil
+}
+func WorkflowActivityFailed(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+			RetryPolicy: &temporal.RetryPolicy{
+				InitialInterval:    1 * time.Second,
+				BackoffCoefficient: 2,
+				MaximumInterval:    100 * time.Second,
+				MaximumAttempts:    50,
+			},
+		},
+	)
+
+	return workflow.ExecuteActivity(ctx, ActivityFailed).Get(ctx, nil)
+}
+
+func TestEnvironment_ActivityFailed(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+	}
+	env.OnActivity(ActivityFailed, mock.Anything).Return(errors.New("activity failed"))
+
+	env.ExecuteWorkflow(WorkflowActivityFailed)
+	require.True(t, env.IsWorkflowCompleted())
+	require.ErrorContains(t, env.GetWorkflowError(), "activity failed")
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_FAILED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED,
+	}, eventTypes)
+
+	retryPolicy := hist.Events[4].GetActivityTaskScheduledEventAttributes().GetRetryPolicy()
+	require.Equal(t, shortRetryInterval, retryPolicy.GetInitialInterval().AsDuration())
+	require.Equal(t, shortRetryInterval, retryPolicy.GetMaximumInterval().AsDuration())
+	require.Equal(t, 1.0, retryPolicy.GetBackoffCoefficient())
+	require.Equal(t, int32(1), retryPolicy.GetMaximumAttempts())
+
+	require.Equal(t, int32(1), hist.Events[5].GetActivityTaskStartedEventAttributes().GetAttempt())
+}
+
+// === Test task queue interceptor override, which is crucial to making sure that
+// the test suite will actually be able to execute it (since it only has one worker
+// and one task queue).
+
+func ActivityCustomTaskQueue(ctx context.Context) error {
+	return nil
+}
+func WorkflowCustomTaskQueue(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+			TaskQueue:              "activity-task-queue",
+		},
+	)
+
+	return workflow.ExecuteActivity(ctx, ActivityCustomTaskQueue).Get(ctx, nil)
+}
+
+func TestEnvironment_CustomTaskQueue(t *testing.T) {
+
+	const envTaskQueue = "env-task-queue"
+
+	s := testsuite.WorkflowTestSuite{}
+	env := TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		activityStubFnRef:       map[string]any{},
+		workflowStubFnRef:       map[string]any{},
+		taskQueue:               envTaskQueue,
+	}
+	env.OnActivity(ActivityCustomTaskQueue, mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowCustomTaskQueue)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, envTaskQueue, hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetTaskQueue().GetName())
+	require.Equal(t, envTaskQueue, hist.Events[4].GetActivityTaskScheduledEventAttributes().GetTaskQueue().GetName())
 }
 
 // === Test that regular registration with no mock will run the actual activity
