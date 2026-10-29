@@ -2,6 +2,7 @@ package regulartests
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -298,4 +299,79 @@ func Test_Workflow_MockDoesNotFallbackOnRealExecution(t *testing.T) {
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.ErrorContains(t, env.GetWorkflowError(), "The method has been called over 3 times")
+}
+
+func Test_Workflow_DoNotRegisterStructButMockOnlyASubsetOfMethods(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	a := &Activities{}
+
+	// mocking a method only registers that method, not the whole struct
+	env.OnActivity(a.EchoName, mock.Anything, Branch1Word).Return("Other word", nil)
+
+	env.ExecuteWorkflow(WorkflowWithStruct, Branch1Word)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.ErrorContains(t, env.GetWorkflowError(), "unable to find activityType=GoesToBranch2Activity")
+	env.AssertActivityNumberOfCalls(t, "EchoName", 1)
+}
+
+func Test_Workflow_OnlyMocksStructs(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+
+	var branch2Runs atomic.Int32
+
+	env.OnActivity(a.EchoName, mock.Anything, Branch1Word).Return("Other word", nil)
+	env.OnActivity(a.GoesToBranch2Activity, mock.Anything).Return(func(context.Context) error {
+		branch2Runs.Add(1)
+		return nil
+	})
+
+	env.ExecuteWorkflow(WorkflowWithStruct, Branch1Word)
+
+	time.Sleep(1 * time.Second)
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result BranchResult
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, 0, result.B1cnt)
+	assert.Equal(t, 10, result.B2cnt)
+	env.AssertActivityNumberOfCalls(t, "EchoName", 10)
+	assert.Equal(t, int32(10), branch2Runs.Load())
+}
+
+func Test_Workflow_CanMockStructMethodsViaName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterActivity(&Activities{})
+
+	var branch2Runs atomic.Int32
+
+	// struct methods are registered under the method name only, without the
+	// struct type
+	env.OnActivity("EchoName", mock.Anything, Branch1Word).Return("Other word", nil)
+	env.OnActivity("GoesToBranch2Activity", mock.Anything).Return(func(context.Context) error {
+		branch2Runs.Add(1)
+		return nil
+	})
+
+	env.ExecuteWorkflow(WorkflowWithStruct, Branch1Word)
+
+	time.Sleep(1 * time.Second)
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result BranchResult
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, 0, result.B1cnt)
+	assert.Equal(t, 10, result.B2cnt)
+	env.AssertActivityNumberOfCalls(t, "EchoName", 10)
+	assert.Equal(t, int32(10), branch2Runs.Load())
 }
