@@ -375,3 +375,27 @@ func Test_Workflow_CanMockStructMethodsViaName(t *testing.T) {
 	env.AssertActivityNumberOfCalls(t, "EchoName", 10)
 	assert.Equal(t, int32(10), branch2Runs.Load())
 }
+
+func Test_Workflow_StructRegistrationNameIsUsedAsPrefix(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+
+	env.RegisterActivityWithOptions(&Activities{}, activity.RegisterOptions{
+		Name: "Prefix",
+	})
+
+	require.Panics(t, func() {
+		env.OnActivity("EchoName", mock.Anything, Branch1Word).Return("Other word", nil)
+	})
+
+	env.OnActivity("PrefixEchoName", mock.Anything, Branch1Word).Return("Other word", nil)
+	env.OnActivity("PrefixGoesToBranch2Activity", mock.Anything).Return(nil)
+
+	// apparently, you can no longer use the struct directly wtf
+	env.ExecuteWorkflow(WorkflowWithStruct, Branch1Word)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.ErrorContains(t, env.GetWorkflowError(), "unable to find activityType=EchoName")
+	require.ErrorContains(t, env.GetWorkflowError(), "PrefixEchoName")
+}

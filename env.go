@@ -45,6 +45,8 @@ type TestWorkflowEnvironment struct {
 	// keep track of activities registered under an alias that may have a
 	// different name from their actual name. the activity type is actually
 	// the alias there. this is also what the sdk does.
+	//
+	// TODO: handle disabled aliasing
 	actAliasRef map[string]string
 
 	dumpHistory dumpHistoryFn
