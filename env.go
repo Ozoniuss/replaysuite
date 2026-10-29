@@ -37,10 +37,10 @@ type TestWorkflowEnvironment struct {
 	activityMock mock.Mock
 	workflowMock mock.Mock
 
-	// Note that each environment assumes that one workflow and one
-	// activity type are associated with one function.
-	activityStubFnRef map[string]any
-	workflowStubFnRef map[string]any
+	actSignRef map[string]any
+	wfSignRef  map[string]any
+
+	actMocked map[string]struct{}
 
 	dumpHistory dumpHistoryFn
 
@@ -65,6 +65,8 @@ func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 
 func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
 	e.TestWorkflowEnvironment.RegisterActivity(a)
+	name, _ := getFunctionName(a)
+	e.actSignRef[name] = a
 	e.worker().RegisterActivityWithOptions(a, activity.RegisterOptions{
 		DisableAlreadyRegisteredCheck: true,
 	})
@@ -73,26 +75,40 @@ func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
 func (e *TestWorkflowEnvironment) RegisterActivityWithOptions(a any, options activity.RegisterOptions) {
 	e.TestWorkflowEnvironment.RegisterActivityWithOptions(a, options)
 	options.DisableAlreadyRegisteredCheck = true
+	if options.Name != "" {
+		e.actSignRef[options.Name] = a
+	} else {
+		name, _ := getFunctionName(a)
+		e.actSignRef[name] = a
+	}
 	e.worker().RegisterActivityWithOptions(a, options)
 }
 
-func (e *TestWorkflowEnvironment) OnActivity(activityFn any, args ...any) *MockCallWrapper {
+func (e *TestWorkflowEnvironment) OnActivity(activityFnOrString any, args ...any) *MockCallWrapper {
 
-	w := e.worker()
-	// mirror what test suite does, so calling this twice doesn't panic
-	w.RegisterActivityWithOptions(activityFn, activity.RegisterOptions{
-		DisableAlreadyRegisteredCheck: true,
-	})
+	var aname string
 
-	name, _ := getFunctionName(activityFn)
+	// mock a function directly
+	if _, ok := activityFnOrString.(string); !ok {
+		w := e.worker()
 
-	if _, ok := e.activityStubFnRef[name]; !ok {
-		e.activityStubFnRef[name] = activityFn
+		// do what the SDK does and register again
+		w.RegisterActivityWithOptions(activityFnOrString, activity.RegisterOptions{
+			DisableAlreadyRegisteredCheck: true,
+		})
+		name, _ := getFunctionName(activityFnOrString)
+		e.actSignRef[name] = activityFnOrString
+		aname = name
+	} else {
+		aname, _ = activityFnOrString.(string)
 	}
+	// mark this activity as mocked so interceptor can replace implementation
+	// using mock inputs and outputs
+	e.actMocked[aname] = struct{}{}
 
 	return &MockCallWrapper{
-		call:  e.activityMock.On(name, args...),
-		inner: e.TestWorkflowEnvironment.OnActivity(activityFn, args...),
+		call:  e.activityMock.On(aname, args...),
+		inner: e.TestWorkflowEnvironment.OnActivity(activityFnOrString, args...),
 	}
 }
 
@@ -100,8 +116,8 @@ func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockC
 
 	name, _ := getFunctionName(workflowFn)
 
-	if _, ok := e.workflowStubFnRef[name]; !ok {
-		e.workflowStubFnRef[name] = workflowFn
+	if _, ok := e.wfSignRef[name]; !ok {
+		e.wfSignRef[name] = workflowFn
 	}
 
 	return &MockCallWrapper{
@@ -117,8 +133,9 @@ func (e *TestWorkflowEnvironment) worker() worker.Worker {
 			Interceptors: []interceptor.WorkerInterceptor{
 				&fastReplayInterceptor{taskQueue: e.getTaskQueue()},
 				&mockActivityInterceptor{
-					mock:    &e.activityMock,
-					stubFns: e.activityStubFnRef,
+					mock:      &e.activityMock,
+					stubFns:   e.actSignRef,
+					actMocked: e.actMocked,
 				}},
 		})
 	}
@@ -187,7 +204,7 @@ func (env *TestWorkflowEnvironment) dynamicActivityHandler(ctx context.Context, 
 	wfID := info.WorkflowExecution.ID
 	actName := info.ActivityType.Name
 
-	stubFn, ok := env.activityStubFnRef[actName]
+	stubFn, ok := env.actSignRef[actName]
 	if !ok {
 		return nil, internalError(fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID))
 	}
@@ -215,7 +232,7 @@ func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context,
 		return nil, internalError(fmt.Errorf("replaysuite: workflow %s has no parent; only mocked child workflows are served by the dynamic handler", wfType))
 	}
 
-	stubFn, ok := env.workflowStubFnRef[wfType]
+	stubFn, ok := env.wfSignRef[wfType]
 	if !ok {
 		return nil, internalError(fmt.Errorf("replaysuite: no OnWorkflow stub for child workflow %s in workflow %s", wfType, parent.ID))
 	}

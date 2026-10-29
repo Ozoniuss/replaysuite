@@ -84,6 +84,17 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func newTestEnv(s testsuite.WorkflowTestSuite) TestWorkflowEnvironment {
+	return TestWorkflowEnvironment{
+		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
+		tclient:                 testclient,
+		dumpHistory:             dumpSingleHistory,
+		actSignRef:              map[string]any{},
+		wfSignRef:               map[string]any{},
+		actMocked:               map[string]struct{}{},
+	}
+}
+
 // === Test for a simple workflow with one activity
 
 func ActivitySimpleFlow(ctx context.Context) error {
@@ -121,13 +132,7 @@ func TestEnvironment_SimpleFlow(t *testing.T) {
 	require.Nil(t, err)
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.OnActivity(ActivitySimpleFlow, mock.Anything).Return(nil)
 
 	env.ExecuteWorkflow(WorkflowSimpleFlow)
@@ -186,13 +191,7 @@ func WorkflowWithArgs(ctx workflow.Context, name string, count int) (string, err
 func TestEnvironment_WithArgs(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.OnActivity(ActivityWithArgs, mock.Anything, "alice", 3).Return("mocked:alice:3", nil)
 
 	env.ExecuteWorkflow(WorkflowWithArgs, "alice", 3)
@@ -255,13 +254,7 @@ func TestEnvironment_WithArgs(t *testing.T) {
 func TestEnvironment_WithArgsNotMocked(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.RegisterActivity(ActivityWithArgs)
 
 	env.ExecuteWorkflow(WorkflowWithArgs, "alice", 3)
@@ -350,13 +343,7 @@ func WorkflowBranching(ctx workflow.Context) error {
 func TestEnvironment_Branching(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.OnActivity(ActivityBranchingFirst, mock.Anything).Return(
 		temporal.NewNonRetryableApplicationError("first failed", "BranchingError", nil),
 	)
@@ -422,13 +409,7 @@ func WorkflowActivityFailed(ctx workflow.Context) error {
 func TestEnvironment_ActivityFailed(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.OnActivity(ActivityFailed, mock.Anything).Return(errors.New("activity failed"))
 
 	env.ExecuteWorkflow(WorkflowActivityFailed)
@@ -488,14 +469,9 @@ func TestEnvironment_CustomTaskQueue(t *testing.T) {
 	const envTaskQueue = "env-task-queue"
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-		taskQueue:               envTaskQueue,
-	}
+	env := newTestEnv(s)
+	// explicitly overwite the task queue so we can compare
+	env.taskQueue = envTaskQueue
 	env.OnActivity(ActivityCustomTaskQueue, mock.Anything).Return(nil)
 
 	env.ExecuteWorkflow(WorkflowCustomTaskQueue)
@@ -558,13 +534,7 @@ func WorkflowRegularRegistration(ctx workflow.Context) error {
 func TestEnvironment_RegularRegistration(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.RegisterActivity(ActivityRegularRegistration)
 	env.ExecuteWorkflow(WorkflowRegularRegistration)
 	require.True(t, env.IsWorkflowCompleted())
@@ -629,13 +599,7 @@ func WorkflowMockOverwritesRegular(ctx workflow.Context) error {
 func TestEnvironment_MockOverwritesRegular(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.RegisterActivity(ActivityMockOverwritesRegular)
 	env.OnActivity(ActivityMockOverwritesRegular, mock.Anything).Return(nil)
 
@@ -668,6 +632,78 @@ func TestEnvironment_MockOverwritesRegular(t *testing.T) {
 
 	require.Equal(t, "WorkflowMockOverwritesRegular", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 	require.Equal(t, "ActivityMockOverwritesRegular", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Makes sure that using a named registration without an OnActivity mock
+// actually uses the proper function instead of the mock (added to capture this
+// bug I was having)
+
+const NamedRegistrationActivityName = "NamedRegistration"
+
+var namedRegistrationCalls atomic.Int32
+
+func ActivityNamedRegistration(ctx context.Context) error {
+	namedRegistrationCalls.Add(1)
+	name := activity.GetInfo(ctx).ActivityType.Name
+	activity.GetLogger(ctx).Info(name)
+	return nil
+}
+func WorkflowNamedRegistration(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, NamedRegistrationActivityName).Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	return nil
+}
+
+func TestEnvironment_NamedRegistration(t *testing.T) {
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivityWithOptions(ActivityNamedRegistration, activity.RegisterOptions{
+		Name: NamedRegistrationActivityName,
+	})
+	env.ExecuteWorkflow(WorkflowNamedRegistration)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	// The real activity runs once in the test environment and once on the dev
+	// server.
+	require.Equal(t, int32(2), namedRegistrationCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowNamedRegistration", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, NamedRegistrationActivityName, hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 }
 
 type ActivitiesStructFlow struct{}
@@ -710,13 +746,7 @@ func TestEnvironment_StructFlow(t *testing.T) {
 	require.Nil(t, err)
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.OnActivity(a.ActivityStructFlow, mock.Anything).Return(nil)
 
 	env.ExecuteWorkflow(WorkflowStructFlow)
@@ -797,13 +827,7 @@ func TestEnvironment_StructPartiallyMocked(t *testing.T) {
 	var a *ActivitiesStructPartiallyMocked
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.RegisterActivity(&ActivitiesStructPartiallyMocked{})
 	env.OnActivity(a.MockedActivityStructPartiallyMocked, mock.Anything).Return(nil)
 
@@ -861,13 +885,7 @@ func WorkflowTimer(ctx workflow.Context) error {
 func TestEnvironment_Timer(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 
 	env.ExecuteWorkflow(WorkflowTimer)
 	require.True(t, env.IsWorkflowCompleted())
@@ -911,13 +929,7 @@ func WorkflowSleep(ctx workflow.Context) error {
 func TestEnvironment_Sleep(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 
 	env.ExecuteWorkflow(WorkflowSleep)
 	require.True(t, env.IsWorkflowCompleted())
@@ -962,13 +974,7 @@ func WorkflowZeroTimer(ctx workflow.Context) error {
 func TestEnvironment_ZeroTimer(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 
 	env.ExecuteWorkflow(WorkflowZeroTimer)
 	require.True(t, env.IsWorkflowCompleted())
@@ -1005,13 +1011,7 @@ func WorkflowZeroSleep(ctx workflow.Context) error {
 func TestEnvironment_ZeroSleep(t *testing.T) {
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 
 	env.ExecuteWorkflow(WorkflowZeroSleep)
 	require.True(t, env.IsWorkflowCompleted())
@@ -1144,13 +1144,7 @@ func TestEnvironment_NamesAsClosures(t *testing.T) {
 	require.Nil(t, err)
 
 	s := testsuite.WorkflowTestSuite{}
-	env := TestWorkflowEnvironment{
-		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-		tclient:                 testclient,
-		dumpHistory:             dumpSingleHistory,
-		activityStubFnRef:       map[string]any{},
-		workflowStubFnRef:       map[string]any{},
-	}
+	env := newTestEnv(s)
 	env.OnActivity(Activity, mock.Anything).Return(nil)
 
 	env.ExecuteWorkflow(Workflow)

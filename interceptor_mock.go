@@ -24,51 +24,56 @@ import (
 // anymore, since they come directly from the interceptor function.
 type mockActivityInterceptor struct {
 	interceptor.WorkerInterceptorBase
-	mock    *mock.Mock
-	stubFns map[string]any
+	mock      *mock.Mock
+	stubFns   map[string]any
+	actMocked map[string]struct{}
 }
 
 func (i *mockActivityInterceptor) InterceptActivity(
 	ctx context.Context, next interceptor.ActivityInboundInterceptor,
 ) interceptor.ActivityInboundInterceptor {
-	in := &mockActivityInbound{mock: i.mock, stubFns: i.stubFns}
+	in := &mockActivityInbound{mock: i.mock, actSignRef: i.stubFns, actMocked: i.actMocked}
 	in.Next = next
 	return in
 }
 
 type mockActivityInbound struct {
 	interceptor.ActivityInboundInterceptorBase
-	mock    *mock.Mock
-	stubFns map[string]any
+	mock       *mock.Mock
+	actSignRef map[string]any
+	actMocked  map[string]struct{}
 }
 
 func (in *mockActivityInbound) ExecuteActivity(
 	ctx context.Context, input *interceptor.ExecuteActivityInput,
 ) (any, error) {
 
-	// when the worker runs an activity, figure out if it's a stub or not
-
 	name := activity.GetInfo(ctx).ActivityType.Name
 
-	stubFn, ok := in.stubFns[name]
-	if !ok {
-		return in.Next.ExecuteActivity(ctx, input)
+	if _, ok := in.actMocked[name]; ok {
+		stubFn, ok := in.actSignRef[name]
+		if !ok {
+			return in.Next.ExecuteActivity(ctx, input)
+		}
+
+		fnType := reflect.TypeOf(stubFn)
+		if fnType == nil || fnType.Kind() != reflect.Func {
+			return nil, internalError(fmt.Errorf("replaysuite: no function signature for mocked activity %s", name))
+		}
+		args := input.Args
+		if fnType.NumIn() > 0 && fnType.In(0).Implements(reflect.TypeFor[context.Context]()) {
+			args = append([]any{ctx}, args...)
+		}
+
+		rets, err := methodCalled(in.mock, name, args)
+		if err != nil {
+			return nil, internalError(fmt.Errorf("replaysuite: activity %s: %w", name, err))
+		}
+		return extractReturn(rets)
 	}
 
-	fnType := reflect.TypeOf(stubFn)
-	if fnType == nil || fnType.Kind() != reflect.Func {
-		return nil, internalError(fmt.Errorf("replaysuite: no function signature for mocked activity %s", name))
-	}
-	args := input.Args
-	if fnType.NumIn() > 0 && fnType.In(0).Implements(reflect.TypeFor[context.Context]()) {
-		args = append([]any{ctx}, args...)
-	}
+	return in.Next.ExecuteActivity(ctx, input)
 
-	rets, err := methodCalled(in.mock, name, args)
-	if err != nil {
-		return nil, internalError(fmt.Errorf("replaysuite: activity %s: %w", name, err))
-	}
-	return extractReturn(rets)
 }
 
 func extractReturn(rets []any) (any, error) {

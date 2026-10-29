@@ -43,8 +43,8 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
 		// hack: currently Start() must be called before NewTestWorkflowEnvironment
 		tclient:           s.client,
-		activityStubFnRef: map[string]any{},
-		workflowStubFnRef: map[string]any{},
+		actSignRef: map[string]any{},
+		wfSignRef: map[string]any{},
 		dumpHistory:       dumpSingleHistory,
 	}
 }
