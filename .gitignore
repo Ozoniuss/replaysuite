@@ -1,1 +1,7 @@
 replaytests/.histories
+.env
+.histories
+.local
+
+# currently experimenting
+cmd/
