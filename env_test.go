@@ -403,6 +403,110 @@ func TestEnvironment_Branching(t *testing.T) {
 	require.Equal(t, "first failed", hist.Events[6].GetActivityTaskFailedEventAttributes().GetFailure().GetMessage())
 }
 
+// === Test that mocking the same activity multiple times is also ran the same
+// on the dev server
+
+var mocksTakeTurnsFirstBranchCalls atomic.Int32
+var mocksTakeTurnsSecondBranchCalls atomic.Int32
+
+func ActivityMocksTakeTurnsDecide(ctx context.Context) (bool, error) {
+	return true, nil
+}
+func ActivityMocksTakeTurnsFirstBranch(ctx context.Context) error {
+	mocksTakeTurnsFirstBranchCalls.Add(1)
+	return nil
+}
+func ActivityMocksTakeTurnsSecondBranch(ctx context.Context) error {
+	mocksTakeTurnsSecondBranchCalls.Add(1)
+	return nil
+}
+func WorkflowMocksTakeTurns(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	for range 2 {
+		var first bool
+		if err := workflow.ExecuteActivity(ctx, ActivityMocksTakeTurnsDecide).Get(ctx, &first); err != nil {
+			return err
+		}
+		branch := ActivityMocksTakeTurnsSecondBranch
+		if first {
+			branch = ActivityMocksTakeTurnsFirstBranch
+		}
+		if err := workflow.ExecuteActivity(ctx, branch).Get(ctx, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestEnvironment_MocksTakeTurns(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivity(ActivityMocksTakeTurnsFirstBranch)
+	env.RegisterActivity(ActivityMocksTakeTurnsSecondBranch)
+	env.OnActivity(ActivityMocksTakeTurnsDecide, mock.Anything).Return(true, nil).Times(1)
+	env.OnActivity(ActivityMocksTakeTurnsDecide, mock.Anything).Return(false, nil)
+
+	env.ExecuteWorkflow(WorkflowMocksTakeTurns)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	// Each branch runs once in the test environment and once on the dev server.
+	require.Equal(t, int32(2), mocksTakeTurnsFirstBranchCalls.Load())
+	require.Equal(t, int32(2), mocksTakeTurnsSecondBranchCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowMocksTakeTurns", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ActivityMocksTakeTurnsDecide", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "ActivityMocksTakeTurnsFirstBranch", hist.Events[10].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "ActivityMocksTakeTurnsDecide", hist.Events[16].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+	require.Equal(t, "ActivityMocksTakeTurnsSecondBranch", hist.Events[22].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
 // === Test a failed activity, plus that its retry policy is overridden and there
 // aren't plenty of retries making the test slow.
 

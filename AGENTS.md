@@ -58,6 +58,10 @@ Running against the local server on `localhost:7233` is fine.
   it first, then match it.
 - For new behavior, write the failing tests first and stop. Implement only
   once asked to.
+- When a test's execution is deterministic and its history reasonably short,
+  assert the full event history: the complete list of event types, plus the
+  relevant attributes such as workflow and activity type names. Keep test
+  workflows small enough for this.
 - Only change what was asked for. Don't edit `TestMain` or restructure existing
   tests without asking.
 - When the request is a question or a design discussion, answer it; don't edit
