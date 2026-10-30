@@ -72,8 +72,7 @@ func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 
 func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
 	e.TestWorkflowEnvironment.RegisterActivity(a)
-	name, _ := getFunctionName(a)
-	e.actSignRef[name] = a
+	e.trackActivitySignatures(a, "")
 	e.worker().RegisterActivityWithOptions(a, activity.RegisterOptions{
 		DisableAlreadyRegisteredCheck: true,
 	})
@@ -82,14 +81,26 @@ func (e *TestWorkflowEnvironment) RegisterActivity(a any) {
 func (e *TestWorkflowEnvironment) RegisterActivityWithOptions(a any, options activity.RegisterOptions) {
 	e.TestWorkflowEnvironment.RegisterActivityWithOptions(a, options)
 	options.DisableAlreadyRegisteredCheck = true
-	name, _ := getFunctionName(a)
-	if options.Name != "" {
-		e.actSignRef[options.Name] = a
-		e.actAliasRef[name] = options.Name
-	} else {
-		e.actSignRef[name] = a
-	}
+	e.trackActivitySignatures(a, options.Name)
 	e.worker().RegisterActivityWithOptions(a, options)
+}
+
+func (e *TestWorkflowEnvironment) trackActivitySignatures(a any, name string) {
+	v := reflect.ValueOf(a)
+	// handle structs same as sdk, and do not track in alias map
+	if v.Kind() == reflect.Pointer && v.Elem().Kind() == reflect.Struct {
+		for i := range v.NumMethod() {
+			e.actSignRef[name+v.Type().Method(i).Name] = v.Method(i).Interface()
+		}
+		return
+	}
+	fnName, _ := getFunctionName(a)
+	if name == "" {
+		e.actSignRef[fnName] = a
+		return
+	}
+	e.actSignRef[name] = a
+	e.actAliasRef[fnName] = name
 }
 
 func (e *TestWorkflowEnvironment) OnActivity(activityFnOrString any, args ...any) *MockCallWrapper {
@@ -209,28 +220,6 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	e.workflowHistoryResult = hist
 
 	return nil
-}
-
-func (env *TestWorkflowEnvironment) dynamicActivityHandler(ctx context.Context, payloads converter.EncodedValues) (any, error) {
-	info := activity.GetInfo(ctx)
-	wfID := info.WorkflowExecution.ID
-	actName := info.ActivityType.Name
-
-	stubFn, ok := env.actSignRef[actName]
-	if !ok {
-		return nil, internalError(fmt.Errorf("replaysuite: no stub for activity %s in workflow %s", actName, wfID))
-	}
-
-	callArgs, err := decodePayloadsViaFnType(ctx, payloads, stubFn)
-	if err != nil {
-		return nil, internalError(fmt.Errorf("decode payloads for %s: %w", actName, err))
-	}
-
-	rets, err := methodCalled(&env.activityMock, actName, callArgs)
-	if err != nil {
-		return nil, internalError(fmt.Errorf("replaysuite: activity %s: %w", actName, err))
-	}
-	return extractReturn(rets)
 }
 
 func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context, payloads converter.EncodedValues) (any, error) {
