@@ -37,6 +37,23 @@ const (
 )
 
 var testclient tclient.Client
+
+// this is used to run actual workflows with a "real" worker without any mocks
+// or interceptor overrides, to have a comparison point. not all tests leverage
+// it.
+//
+// you can add code like this.
+//
+// testworker.RegisterWorkflow(WorkflowSimpleFlow)
+//
+// testworker.RegisterActivity(ActivitySimpleFlow)
+//
+//	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
+//		ID:        "Test Simple Flow",
+//		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
+//	}, WorkflowSimpleFlow)
+//
+// require.Nil(t, err)
 var testworker worker.Worker
 
 func TestMain(m *testing.M) {
@@ -61,11 +78,8 @@ func TestMain(m *testing.M) {
 		}
 		fmt.Fprintf(os.Stdout, "using real server")
 
-		// TODO: a single shared worker might have registration conflicts e.g.
-		// when using anonymous functions, which get registered via the name
-		// inferred at runtime.
-		testworker = worker.New(testclient, REAL_EXECUTION_TASK_QUEUE, worker.Options{})
-		testworker.Start()
+		// testworker = worker.New(testclient, REAL_EXECUTION_TASK_QUEUE, worker.Options{})
+		// testworker.Start()
 
 	} else {
 		srv, err = testsuite.StartDevServer(context.Background(), testsuite.DevServerOptions{
@@ -85,9 +99,9 @@ func TestMain(m *testing.M) {
 	if srv != nil {
 		_ = srv.Stop()
 	}
-	if testworker != nil {
-		testworker.Stop()
-	}
+	// if testworker != nil {
+	// 	testworker.Stop()
+	// }
 	testclient.Close()
 
 	os.Exit(code)
@@ -132,15 +146,6 @@ func WorkflowSimpleFlow(ctx workflow.Context) error {
 
 func TestEnvironment_SimpleFlow(t *testing.T) {
 	t.Parallel()
-
-	testworker.RegisterWorkflow(WorkflowSimpleFlow)
-	testworker.RegisterActivity(ActivitySimpleFlow)
-	// testworker.RegisterActivity(ActivitySimpleFlow)
-	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
-		ID:        "Test Simple Flow",
-		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
-	}, WorkflowSimpleFlow)
-	require.Nil(t, err)
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -800,6 +805,70 @@ func TestEnvironment_NamedRegistration(t *testing.T) {
 	require.Equal(t, NamedRegistrationActivityName, hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 }
 
+// === Mock via name, called via name in workflow, function itself has different
+// name
+
+func WorkflowNamedActivity(ctx workflow.Context) error {
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+	logger := workflow.GetLogger(ctx)
+	logger.Info(name)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, "NamedActivity").Get(ctx, nil); err != nil {
+		logger.Error("Execute Activity failed.", "Error", err)
+		return err
+	}
+	return nil
+}
+
+func TestEnvironment_NamedActivity(t *testing.T) {
+
+	Activity := func(ctx context.Context) error {
+		name := activity.GetInfo(ctx).ActivityType.Name
+		activity.GetLogger(ctx).Info(name)
+		return nil
+	}
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(s)
+	env.RegisterActivityWithOptions(Activity, activity.RegisterOptions{Name: "NamedActivity"})
+	env.OnActivity("NamedActivity", mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(WorkflowNamedActivity)
+	require.True(t, env.IsWorkflowCompleted())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowNamedActivity", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "NamedActivity", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Test that it works properly with a struct registration.
+
 type ActivitiesStructFlow struct{}
 
 func (a *ActivitiesStructFlow) ActivityStructFlow(ctx context.Context) error {
@@ -826,20 +895,10 @@ func WorkflowStructFlow(ctx workflow.Context) error {
 	return nil
 }
 
-// === Test that it works properly with a struct registration.
-
 func TestEnvironment_StructFlow(t *testing.T) {
 	t.Parallel()
 
 	var a *ActivitiesStructFlow
-	testworker.RegisterWorkflow(WorkflowStructFlow)
-	testworker.RegisterActivity(&ActivitiesStructFlow{})
-	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
-		ID:        "Test Struct Flow",
-		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
-	}, WorkflowStructFlow)
-	require.Nil(t, err)
-
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
 	env.OnActivity(a.ActivityStructFlow, mock.Anything).Return(nil)
@@ -1409,82 +1468,6 @@ func TestEnvironment_ZeroSleep(t *testing.T) {
 	require.Equal(t, "WorkflowZeroSleep", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 }
 
-const NamedActivityName = "NamedActivity"
-
-func WorkflowNamedActivity(ctx workflow.Context) error {
-	name := workflow.GetInfo(ctx).WorkflowType.Name
-	logger := workflow.GetLogger(ctx)
-	logger.Info(name)
-
-	ctx = workflow.WithActivityOptions(
-		ctx, workflow.ActivityOptions{
-			ScheduleToCloseTimeout: 1 * time.Minute,
-		},
-	)
-
-	if err := workflow.ExecuteActivity(ctx, NamedActivityName).Get(ctx, nil); err != nil {
-		logger.Error("Execute Activity failed.", "Error", err)
-		return err
-	}
-	return nil
-}
-
-// TODO: this test currently fails, need to figure out how to handle aliasing.
-// func TestEnvironment_NamedActivity(t *testing.T) {
-
-// 	Activity := func(ctx context.Context) error {
-// 		name := activity.GetInfo(ctx).ActivityType.Name
-// 		activity.GetLogger(ctx).Info(name)
-// 		return nil
-// 	}
-
-// 	testworker.RegisterWorkflow(WorkflowNamedActivity)
-// 	testworker.RegisterActivityWithOptions(Activity, activity.RegisterOptions{Name: NamedActivityName})
-// 	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
-// 		ID:        "Test Named Activity",
-// 		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
-// 	}, WorkflowNamedActivity)
-// 	require.Nil(t, err)
-
-// 	s := testsuite.WorkflowTestSuite{}
-// 	env := TestWorkflowEnvironment{
-// 		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
-// 		tclient:                 testclient,
-// 		dumpHistory:             dumpSingleHistory,
-// 		activityStubFnRef:       map[string]any{},
-// 		workflowStubFnRef:       map[string]any{},
-// 	}
-// 	env.RegisterActivityWithOptions(Activity, activity.RegisterOptions{Name: NamedActivityName})
-// 	env.OnActivity(NamedActivityName, mock.Anything).Return(nil)
-
-// 	env.ExecuteWorkflow(WorkflowNamedActivity)
-// 	require.True(t, env.IsWorkflowCompleted())
-
-// 	hist := env.workflowHistoryResult
-// 	require.NotNil(t, hist)
-
-// 	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
-// 	for _, ev := range hist.Events {
-// 		eventTypes = append(eventTypes, ev.GetEventType())
-// 	}
-// 	require.Equal(t, []enumspb.EventType{
-// 		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
-// 		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
-// 		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
-// 		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
-// 		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
-// 		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
-// 		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
-// 		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
-// 		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
-// 		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
-// 		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
-// 	}, eventTypes)
-
-// 	require.Equal(t, "WorkflowNamedActivity", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
-// 	require.Equal(t, NamedActivityName, hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
-// }
-
 func TestEnvironment_NamesAsClosures(t *testing.T) {
 	t.Parallel()
 
@@ -1508,15 +1491,6 @@ func TestEnvironment_NamesAsClosures(t *testing.T) {
 		}
 		return nil
 	}
-
-	testworker.RegisterWorkflow(Workflow)
-	testworker.RegisterActivity(Activity)
-	// testworker.RegisterActivity(Activity)
-	_, err := testclient.ExecuteWorkflow(t.Context(), tclient.StartWorkflowOptions{
-		ID:        "Test Names as Closures",
-		TaskQueue: REAL_EXECUTION_TASK_QUEUE,
-	}, Workflow)
-	require.Nil(t, err)
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
