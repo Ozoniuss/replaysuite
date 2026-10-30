@@ -17,6 +17,7 @@ func publicMethodNames(t reflect.Type) []string {
 }
 
 func TestMockCallWrapperMatchesInnerMethods(t *testing.T) {
+	t.Parallel()
 	// Given
 	wrapperType := reflect.TypeFor[*MockCallWrapper]()
 	innerType := reflect.TypeFor[*testsuite.MockCallWrapper]()

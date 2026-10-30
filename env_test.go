@@ -1,3 +1,12 @@
+// Tests run in parallel against a dev server started by TestMain:
+//
+//	go test .
+//
+// To run against a temporal server already listening on localhost:7233:
+//
+//	REPLAYSUITE_TEST_WITH_REAL_SERVER=true go test .
+//
+// To run the tests sequentially, add -parallel 1.
 package replaysuite
 
 import (
@@ -122,6 +131,7 @@ func WorkflowSimpleFlow(ctx workflow.Context) error {
 }
 
 func TestEnvironment_SimpleFlow(t *testing.T) {
+	t.Parallel()
 
 	testworker.RegisterWorkflow(WorkflowSimpleFlow)
 	testworker.RegisterActivity(ActivitySimpleFlow)
@@ -190,6 +200,7 @@ func WorkflowWithArgs(ctx workflow.Context, name string, count int) (string, err
 }
 
 func TestEnvironment_WithArgs(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -253,6 +264,7 @@ func TestEnvironment_WithArgs(t *testing.T) {
 // supposed to run as expected.
 
 func TestEnvironment_WithArgsNotMocked(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -342,6 +354,7 @@ func WorkflowBranching(ctx workflow.Context) error {
 }
 
 func TestEnvironment_Branching(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -408,6 +421,7 @@ func WorkflowActivityFailed(ctx workflow.Context) error {
 }
 
 func TestEnvironment_ActivityFailed(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -466,6 +480,7 @@ func WorkflowCustomTaskQueue(ctx workflow.Context) error {
 }
 
 func TestEnvironment_CustomTaskQueue(t *testing.T) {
+	t.Parallel()
 
 	const envTaskQueue = "env-task-queue"
 
@@ -533,6 +548,7 @@ func WorkflowRegularRegistration(ctx workflow.Context) error {
 }
 
 func TestEnvironment_RegularRegistration(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -598,6 +614,7 @@ func WorkflowMockOverwritesRegular(ctx workflow.Context) error {
 }
 
 func TestEnvironment_MockOverwritesRegular(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -662,6 +679,7 @@ func WorkflowAliasedRegistration(ctx workflow.Context) (string, error) {
 }
 
 func TestEnvironment_AliasedRegistrationMocked(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -742,6 +760,7 @@ func WorkflowNamedRegistration(ctx workflow.Context) error {
 }
 
 func TestEnvironment_NamedRegistration(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -810,6 +829,7 @@ func WorkflowStructFlow(ctx workflow.Context) error {
 // === Test that it works properly with a struct registration.
 
 func TestEnvironment_StructFlow(t *testing.T) {
+	t.Parallel()
 
 	var a *ActivitiesStructFlow
 	testworker.RegisterWorkflow(WorkflowStructFlow)
@@ -898,6 +918,7 @@ func WorkflowStructPartiallyMocked(ctx workflow.Context) error {
 }
 
 func TestEnvironment_StructPartiallyMocked(t *testing.T) {
+	t.Parallel()
 
 	var a *ActivitiesStructPartiallyMocked
 
@@ -979,6 +1000,7 @@ func WorkflowStructRegistered(ctx workflow.Context) error {
 }
 
 func TestEnvironment_StructRegistered(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1059,6 +1081,7 @@ func WorkflowStructAliased(ctx workflow.Context) error {
 }
 
 func TestEnvironment_StructAliased(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1140,6 +1163,7 @@ func WorkflowStructViaName(ctx workflow.Context) error {
 }
 
 func TestEnvironment_StructMockedViaName(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1195,6 +1219,7 @@ func WorkflowStructPrefixed(ctx workflow.Context) error {
 }
 
 func TestEnvironment_StructRegisteredWithPrefix(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1228,6 +1253,7 @@ func WorkflowTimer(ctx workflow.Context) error {
 }
 
 func TestEnvironment_Timer(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1272,6 +1298,7 @@ func WorkflowSleep(ctx workflow.Context) error {
 }
 
 func TestEnvironment_Sleep(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1317,6 +1344,7 @@ func WorkflowZeroTimer(ctx workflow.Context) error {
 }
 
 func TestEnvironment_ZeroTimer(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1354,6 +1382,7 @@ func WorkflowZeroSleep(ctx workflow.Context) error {
 }
 
 func TestEnvironment_ZeroSleep(t *testing.T) {
+	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
 	env := newTestEnv(s)
@@ -1457,6 +1486,7 @@ func WorkflowNamedActivity(ctx workflow.Context) error {
 // }
 
 func TestEnvironment_NamesAsClosures(t *testing.T) {
+	t.Parallel()
 
 	Activity := func(ctx context.Context) error {
 		activity.GetLogger(ctx).Info("ActivityNamesAsClosures")
@@ -1550,6 +1580,7 @@ func requireSameAsSDK(t *testing.T, i any, name string, isMethod bool) {
 }
 
 func TestActivityFunctionName(t *testing.T) {
+	t.Parallel()
 	t.Run("string activity name", func(t *testing.T) {
 		// Given
 		const activityName = "CustomActivityName"
@@ -1656,6 +1687,7 @@ func TestActivityFunctionName(t *testing.T) {
 }
 
 func TestAnnotatePayloadData(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{
 		"events": [
 			{
