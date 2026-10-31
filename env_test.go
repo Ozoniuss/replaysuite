@@ -1949,6 +1949,65 @@ func TestEnvironment_NamedChildWorkflow(t *testing.T) {
 	require.Equal(t, "mocked:alice", childResult)
 }
 
+// === Test a mocked child workflow that fails.
+
+var childFailedRuns atomic.Int32
+
+func ChildWorkflowChildFailed(ctx workflow.Context) error {
+	childFailedRuns.Add(1)
+	return nil
+}
+func WorkflowChildFailed(ctx workflow.Context) error {
+	return workflow.ExecuteChildWorkflow(ctx, ChildWorkflowChildFailed).Get(ctx, nil)
+}
+
+func TestEnvironment_ChildWorkflowFailed(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.OnWorkflow(ChildWorkflowChildFailed, mock.Anything).Return(errors.New("child workflow failed"))
+
+	env.ExecuteWorkflow(WorkflowChildFailed)
+	require.True(t, env.IsWorkflowCompleted())
+	require.ErrorContains(t, env.GetWorkflowError(), "child workflow failed")
+
+	require.Equal(t, int32(0), childFailedRuns.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_FAILED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowChildFailed", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ChildWorkflowChildFailed", hist.Events[4].GetStartChildWorkflowExecutionInitiatedEventAttributes().GetWorkflowType().GetName())
+
+	childFailed := hist.Events[9].GetChildWorkflowExecutionFailedEventAttributes()
+	require.Equal(t, "ChildWorkflowChildFailed", childFailed.GetWorkflowType().GetName())
+	require.Contains(t, childFailed.GetFailure().GetMessage(), "child workflow failed")
+
+	require.Contains(t, hist.Events[13].GetWorkflowExecutionFailedEventAttributes().GetFailure().GetMessage(), "child workflow")
+}
+
 func TestEnvironment_NamesAsClosures(t *testing.T) {
 	t.Parallel()
 

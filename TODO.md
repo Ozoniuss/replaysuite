@@ -1,9 +1,8 @@
 Featuers I want to cover:
 
 - finish up suite wrapper
-- child workflows
 - continue as new
-- signals 
+- signals, queries
 - dynamic handlers
 - nexus
 - side effect
