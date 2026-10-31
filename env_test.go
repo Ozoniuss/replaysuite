@@ -1746,6 +1746,209 @@ func TestEnvironment_ChildWorkflowNotMocked(t *testing.T) {
 	require.Equal(t, "real:alice", childResult)
 }
 
+// === Test that mocking a child workflow registered with a custom name mocks
+// the custom name instead of the real workflow (and that in the history the
+// alias shows up as the type)
+
+var childAliasedRegistrationRuns atomic.Int32
+
+func ChildWorkflowAliasedRegistration(ctx workflow.Context, name string) (string, error) {
+	childAliasedRegistrationRuns.Add(1)
+	return "real:" + name, nil
+}
+func WorkflowChildAliasedRegistration(ctx workflow.Context, name string) (string, error) {
+	var result string
+	if err := workflow.ExecuteChildWorkflow(ctx, ChildWorkflowAliasedRegistration, name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func TestEnvironment_ChildWorkflowAliasedRegistrationMocked(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.RegisterWorkflowWithOptions(ChildWorkflowAliasedRegistration, workflow.RegisterOptions{
+		Name: "AliasedRegistrationChild",
+	})
+	env.OnWorkflow(ChildWorkflowAliasedRegistration, mock.Anything, "alice").Return("mocked:alice", nil)
+
+	env.ExecuteWorkflow(WorkflowChildAliasedRegistration, "alice")
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "mocked:alice", envResult)
+
+	require.Equal(t, int32(0), childAliasedRegistrationRuns.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowChildAliasedRegistration", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "AliasedRegistrationChild", hist.Events[4].GetStartChildWorkflowExecutionInitiatedEventAttributes().GetWorkflowType().GetName())
+
+	var childResult string
+	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[9].GetChildWorkflowExecutionCompletedEventAttributes().GetResult(), &childResult))
+	require.Equal(t, "mocked:alice", childResult)
+}
+
+// === Test that a child workflow with a named registration and no OnWorkflow
+// mock runs its real implementation when called by name (e.g. when workflow
+// is coming from a different codebase)
+
+var childNamedRegistrationRuns atomic.Int32
+
+func ChildWorkflowNamedRegistration(ctx workflow.Context, name string) (string, error) {
+	childNamedRegistrationRuns.Add(1)
+	return "real:" + name, nil
+}
+func WorkflowChildNamedRegistration(ctx workflow.Context, name string) (string, error) {
+	var result string
+	if err := workflow.ExecuteChildWorkflow(ctx, "NamedRegistrationChild", name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func TestEnvironment_ChildWorkflowNamedRegistration(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.RegisterWorkflowWithOptions(ChildWorkflowNamedRegistration, workflow.RegisterOptions{
+		Name: "NamedRegistrationChild",
+	})
+
+	env.ExecuteWorkflow(WorkflowChildNamedRegistration, "alice")
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "real:alice", envResult)
+
+	// once in the SDK environment and once on the dev server
+	require.Equal(t, int32(2), childNamedRegistrationRuns.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowChildNamedRegistration", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "NamedRegistrationChild", hist.Events[4].GetStartChildWorkflowExecutionInitiatedEventAttributes().GetWorkflowType().GetName())
+
+	var childResult string
+	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[9].GetChildWorkflowExecutionCompletedEventAttributes().GetResult(), &childResult))
+	require.Equal(t, "real:alice", childResult)
+}
+
+// === Mock child workflow via name directly
+
+var namedChildWorkflowRuns atomic.Int32
+
+func ChildWorkflowNamed(ctx workflow.Context, name string) (string, error) {
+	namedChildWorkflowRuns.Add(1)
+	return "real:" + name, nil
+}
+func WorkflowNamedChildWorkflow(ctx workflow.Context, name string) (string, error) {
+	var result string
+	if err := workflow.ExecuteChildWorkflow(ctx, "NamedChildWorkflow", name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func TestEnvironment_NamedChildWorkflow(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.RegisterWorkflowWithOptions(ChildWorkflowNamed, workflow.RegisterOptions{Name: "NamedChildWorkflow"})
+	env.OnWorkflow("NamedChildWorkflow", mock.Anything, "alice").Return("mocked:alice", nil)
+
+	env.ExecuteWorkflow(WorkflowNamedChildWorkflow, "alice")
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "mocked:alice", envResult)
+
+	require.Equal(t, int32(0), namedChildWorkflowRuns.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowNamedChildWorkflow", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "NamedChildWorkflow", hist.Events[4].GetStartChildWorkflowExecutionInitiatedEventAttributes().GetWorkflowType().GetName())
+
+	var childResult string
+	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[9].GetChildWorkflowExecutionCompletedEventAttributes().GetResult(), &childResult))
+	require.Equal(t, "mocked:alice", childResult)
+}
+
 func TestEnvironment_NamesAsClosures(t *testing.T) {
 	t.Parallel()
 
