@@ -2008,6 +2008,95 @@ func TestEnvironment_ChildWorkflowFailed(t *testing.T) {
 	require.Contains(t, hist.Events[13].GetWorkflowExecutionFailedEventAttributes().GetFailure().GetMessage(), "child workflow")
 }
 
+// === Test a workflow that records two side effects, which are identified by
+// their call order.
+
+var sideEffectFirstRuns atomic.Int32
+var sideEffectSecondRuns atomic.Int32
+
+func WorkflowSideEffect(ctx workflow.Context) ([]string, error) {
+	var first string
+	err := workflow.SideEffect(ctx, func(ctx workflow.Context) any {
+		sideEffectFirstRuns.Add(1)
+		return "first"
+	}).Get(&first)
+	if err != nil {
+		return nil, err
+	}
+
+	var second string
+	err = workflow.SideEffect(ctx, func(ctx workflow.Context) any {
+		sideEffectSecondRuns.Add(1)
+		return "second"
+	}).Get(&second)
+	if err != nil {
+		return nil, err
+	}
+
+	return []string{first, second}, nil
+}
+
+func TestEnvironment_SideEffect(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+
+	env.ExecuteWorkflow(WorkflowSideEffect)
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult []string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, []string{"first", "second"}, envResult)
+
+	// once in the SDK environment and once on the dev server
+	require.Equal(t, int32(2), sideEffectFirstRuns.Load())
+	require.Equal(t, int32(2), sideEffectSecondRuns.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_MARKER_RECORDED,
+		enumspb.EVENT_TYPE_MARKER_RECORDED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowSideEffect", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+
+	dc := converter.GetDefaultDataConverter()
+
+	firstMarker := hist.Events[4].GetMarkerRecordedEventAttributes()
+	require.Equal(t, "SideEffect", firstMarker.GetMarkerName())
+
+	var firstID int64
+	require.NoError(t, dc.FromPayloads(firstMarker.GetDetails()["side-effect-id"], &firstID))
+	require.Equal(t, int64(1), firstID)
+
+	var firstData string
+	require.NoError(t, dc.FromPayloads(firstMarker.GetDetails()["data"], &firstData))
+	require.Equal(t, "first", firstData)
+
+	secondMarker := hist.Events[5].GetMarkerRecordedEventAttributes()
+	require.Equal(t, "SideEffect", secondMarker.GetMarkerName())
+
+	var secondID int64
+	require.NoError(t, dc.FromPayloads(secondMarker.GetDetails()["side-effect-id"], &secondID))
+	require.Equal(t, int64(2), secondID)
+
+	var secondData string
+	require.NoError(t, dc.FromPayloads(secondMarker.GetDetails()["data"], &secondData))
+	require.Equal(t, "second", secondData)
+}
+
 func TestEnvironment_NamesAsClosures(t *testing.T) {
 	t.Parallel()
 
