@@ -107,15 +107,17 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func newTestEnv(s testsuite.WorkflowTestSuite) TestWorkflowEnvironment {
-	return TestWorkflowEnvironment{
+func newTestEnv(t *testing.T, s testsuite.WorkflowTestSuite) *TestWorkflowEnvironment {
+	return &TestWorkflowEnvironment{
+		t:                       t,
 		TestWorkflowEnvironment: s.NewTestWorkflowEnvironment(),
 		tclient:                 testclient,
 		dumpHistory:             dumpSingleHistory,
 		actSignRef:              map[string]any{},
-		wfSignRef:               map[string]any{},
 		actMocked:               map[string]struct{}{},
+		wfMocked:                map[string]struct{}{},
 		actAliasRef:             map[string]string{},
+		wfAliasRef:              map[string]string{},
 	}
 }
 
@@ -148,7 +150,7 @@ func TestEnvironment_SimpleFlow(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.OnActivity(ActivitySimpleFlow, mock.Anything).Return(nil)
 
 	env.ExecuteWorkflow(WorkflowSimpleFlow)
@@ -208,7 +210,7 @@ func TestEnvironment_WithArgs(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.OnActivity(ActivityWithArgs, mock.Anything, "alice", 3).Return("mocked:alice:3", nil)
 
 	env.ExecuteWorkflow(WorkflowWithArgs, "alice", 3)
@@ -272,7 +274,7 @@ func TestEnvironment_WithArgsNotMocked(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivity(ActivityWithArgs)
 
 	env.ExecuteWorkflow(WorkflowWithArgs, "alice", 3)
@@ -362,7 +364,7 @@ func TestEnvironment_Branching(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.OnActivity(ActivityBranchingFirst, mock.Anything).Return(
 		temporal.NewNonRetryableApplicationError("first failed", "BranchingError", nil),
 	)
@@ -447,7 +449,7 @@ func TestEnvironment_MocksTakeTurns(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivity(ActivityMocksTakeTurnsFirstBranch)
 	env.RegisterActivity(ActivityMocksTakeTurnsSecondBranch)
 	env.OnActivity(ActivityMocksTakeTurnsDecide, mock.Anything).Return(true, nil).Times(1)
@@ -533,7 +535,7 @@ func TestEnvironment_ActivityFailed(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.OnActivity(ActivityFailed, mock.Anything).Return(errors.New("activity failed"))
 
 	env.ExecuteWorkflow(WorkflowActivityFailed)
@@ -594,7 +596,7 @@ func TestEnvironment_CustomTaskQueue(t *testing.T) {
 	const envTaskQueue = "env-task-queue"
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	// explicitly overwite the task queue so we can compare
 	env.taskQueue = envTaskQueue
 	env.OnActivity(ActivityCustomTaskQueue, mock.Anything).Return(nil)
@@ -660,7 +662,7 @@ func TestEnvironment_RegularRegistration(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivity(ActivityRegularRegistration)
 	env.ExecuteWorkflow(WorkflowRegularRegistration)
 	require.True(t, env.IsWorkflowCompleted())
@@ -726,7 +728,7 @@ func TestEnvironment_MockOverwritesRegular(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivity(ActivityMockOverwritesRegular)
 	env.OnActivity(ActivityMockOverwritesRegular, mock.Anything).Return(nil)
 
@@ -791,7 +793,7 @@ func TestEnvironment_AliasedRegistrationMocked(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivityWithOptions(ActivityAliasedRegistration, activity.RegisterOptions{
 		Name: AliasedRegistrationActivityName,
 	})
@@ -872,7 +874,7 @@ func TestEnvironment_NamedRegistration(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivityWithOptions(ActivityNamedRegistration, activity.RegisterOptions{
 		Name: NamedRegistrationActivityName,
 	})
@@ -939,7 +941,7 @@ func TestEnvironment_NamedActivity(t *testing.T) {
 	}
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivityWithOptions(Activity, activity.RegisterOptions{Name: "NamedActivity"})
 	env.OnActivity("NamedActivity", mock.Anything).Return(nil)
 
@@ -1004,7 +1006,7 @@ func TestEnvironment_StructFlow(t *testing.T) {
 
 	var a *ActivitiesStructFlow
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.OnActivity(a.ActivityStructFlow, mock.Anything).Return(nil)
 
 	env.ExecuteWorkflow(WorkflowStructFlow)
@@ -1086,7 +1088,7 @@ func TestEnvironment_StructPartiallyMocked(t *testing.T) {
 	var a *ActivitiesStructPartiallyMocked
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivity(&ActivitiesStructPartiallyMocked{})
 	env.OnActivity(a.MockedActivityStructPartiallyMocked, mock.Anything).Return(nil)
 
@@ -1166,7 +1168,7 @@ func TestEnvironment_StructRegistered(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivity(&ActivitiesStructRegistered{})
 
 	env.ExecuteWorkflow(WorkflowStructRegistered)
@@ -1247,7 +1249,7 @@ func TestEnvironment_StructAliased(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivityWithOptions(&ActivitiesStructAliased{}, activity.RegisterOptions{
 		Name: StructAliasedPrefix,
 	})
@@ -1329,7 +1331,7 @@ func TestEnvironment_StructMockedViaName(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivity(&ActivitiesStructViaName{})
 	env.OnActivity("MockedActivityStructViaName", mock.Anything).Return(nil)
 
@@ -1385,7 +1387,7 @@ func TestEnvironment_StructRegisteredWithPrefix(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.RegisterActivityWithOptions(&ActivitiesStructPrefixed{}, activity.RegisterOptions{
 		Name: StructPrefix,
 	})
@@ -1419,7 +1421,7 @@ func TestEnvironment_Timer(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 
 	env.ExecuteWorkflow(WorkflowTimer)
 	require.True(t, env.IsWorkflowCompleted())
@@ -1464,7 +1466,7 @@ func TestEnvironment_Sleep(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 
 	env.ExecuteWorkflow(WorkflowSleep)
 	require.True(t, env.IsWorkflowCompleted())
@@ -1510,7 +1512,7 @@ func TestEnvironment_ZeroTimer(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 
 	env.ExecuteWorkflow(WorkflowZeroTimer)
 	require.True(t, env.IsWorkflowCompleted())
@@ -1548,7 +1550,7 @@ func TestEnvironment_ZeroSleep(t *testing.T) {
 	t.Parallel()
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 
 	env.ExecuteWorkflow(WorkflowZeroSleep)
 	require.True(t, env.IsWorkflowCompleted())
@@ -1570,6 +1572,178 @@ func TestEnvironment_ZeroSleep(t *testing.T) {
 	}, eventTypes)
 
 	require.Equal(t, "WorkflowZeroSleep", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+}
+
+// === Test that a mocked child workflow returns the mocked result on the dev
+// server and its real implementation never runs.
+
+var childMockedRuns atomic.Int32
+
+func ActivityChildMocked(ctx context.Context, name string) (string, error) {
+	return "real:" + name, nil
+}
+func ChildWorkflowChildMocked(ctx workflow.Context, name string) (string, error) {
+	childMockedRuns.Add(1)
+
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var result string
+	if err := workflow.ExecuteActivity(ctx, ActivityChildMocked, name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+func WorkflowChildMocked(ctx workflow.Context, name string) (string, error) {
+	var result string
+	if err := workflow.ExecuteChildWorkflow(ctx, ChildWorkflowChildMocked, name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func TestEnvironment_ChildWorkflowMocked(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.OnWorkflow(ChildWorkflowChildMocked, mock.Anything, "alice").Return("mocked:alice", nil)
+
+	env.ExecuteWorkflow(WorkflowChildMocked, "alice")
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "mocked:alice", envResult)
+
+	require.Equal(t, int32(0), childMockedRuns.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	// This order may not be reliable. Child workflows don't work the same way
+	// as activities in the sense that the worker will react to a child workflow
+	// execution started event (e.g. to resolve what's returned when calling
+	// get cw execution). They don't do that for activities started hence no
+	// workflow tasks if wait is synchronous there.
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowChildMocked", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ChildWorkflowChildMocked", hist.Events[4].GetStartChildWorkflowExecutionInitiatedEventAttributes().GetWorkflowType().GetName())
+
+	dc := converter.GetDefaultDataConverter()
+
+	var childInput string
+	require.NoError(t, dc.FromPayloads(hist.Events[4].GetStartChildWorkflowExecutionInitiatedEventAttributes().GetInput(), &childInput))
+	require.Equal(t, "alice", childInput)
+
+	var childResult string
+	require.NoError(t, dc.FromPayloads(hist.Events[9].GetChildWorkflowExecutionCompletedEventAttributes().GetResult(), &childResult))
+	require.Equal(t, "mocked:alice", childResult)
+}
+
+// === Test that a registered child workflow without a mock runs its real
+// implementation on the dev server.
+
+var childNotMockedActivityCalls atomic.Int32
+
+func ActivityChildNotMocked(ctx context.Context, name string) (string, error) {
+	childNotMockedActivityCalls.Add(1)
+	return "real:" + name, nil
+}
+func ChildWorkflowChildNotMocked(ctx workflow.Context, name string) (string, error) {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	var result string
+	if err := workflow.ExecuteActivity(ctx, ActivityChildNotMocked, name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+func WorkflowChildNotMocked(ctx workflow.Context, name string) (string, error) {
+	var result string
+	if err := workflow.ExecuteChildWorkflow(ctx, ChildWorkflowChildNotMocked, name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func TestEnvironment_ChildWorkflowNotMocked(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.RegisterWorkflow(ChildWorkflowChildNotMocked)
+	env.RegisterActivity(ActivityChildNotMocked)
+
+	env.ExecuteWorkflow(WorkflowChildNotMocked, "alice")
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, "real:alice", envResult)
+
+	// once in the SDK environment and once on the dev server
+	require.Equal(t, int32(2), childNotMockedActivityCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, "WorkflowChildNotMocked", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ChildWorkflowChildNotMocked", hist.Events[4].GetStartChildWorkflowExecutionInitiatedEventAttributes().GetWorkflowType().GetName())
+
+	dc := converter.GetDefaultDataConverter()
+
+	var childResult string
+	require.NoError(t, dc.FromPayloads(hist.Events[9].GetChildWorkflowExecutionCompletedEventAttributes().GetResult(), &childResult))
+	require.Equal(t, "real:alice", childResult)
 }
 
 func TestEnvironment_NamesAsClosures(t *testing.T) {
@@ -1597,7 +1771,7 @@ func TestEnvironment_NamesAsClosures(t *testing.T) {
 	}
 
 	s := testsuite.WorkflowTestSuite{}
-	env := newTestEnv(s)
+	env := newTestEnv(t, s)
 	env.OnActivity(Activity, mock.Anything).Return(nil)
 
 	env.ExecuteWorkflow(Workflow)

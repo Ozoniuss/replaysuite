@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +16,6 @@ import (
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
@@ -37,10 +37,12 @@ type TestWorkflowEnvironment struct {
 	activityMock mock.Mock
 	workflowMock mock.Mock
 
+	// this is only needed to figure out if an activity takes a context.Context
+	// parameter or not
 	actSignRef map[string]any
-	wfSignRef  map[string]any
 
 	actMocked map[string]struct{}
+	wfMocked  map[string]struct{}
 
 	// keep track of activities registered under an alias that may have a
 	// different name from their actual name. the activity type is actually
@@ -48,6 +50,7 @@ type TestWorkflowEnvironment struct {
 	//
 	// TODO: handle disabled aliasing
 	actAliasRef map[string]string
+	wfAliasRef  map[string]string
 
 	dumpHistory dumpHistoryFn
 
@@ -58,6 +61,9 @@ type TestWorkflowEnvironment struct {
 	taskQueue string
 
 	w worker.Worker
+
+	// report mirror server failure to test suite
+	t *testing.T
 }
 
 type dumpHistoryFn func(wfType, wfId string, hist *historypb.History) error
@@ -77,6 +83,10 @@ func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
 
 	if err := e.mirrorOnDevServer(workflowFn, args); err != nil {
+		if e.t != nil {
+			e.t.Helper()
+			e.t.Fatalf("[replaysuite] dev-server mirror failed: %v", err)
+		}
 		panic(fmt.Sprintf("[replaysuite] dev-server mirror failed: %v", err))
 	}
 }
@@ -146,13 +156,42 @@ func (e *TestWorkflowEnvironment) OnActivity(activityFnOrString any, args ...any
 	}
 }
 
+func (e *TestWorkflowEnvironment) RegisterWorkflow(w any) {
+	e.TestWorkflowEnvironment.RegisterWorkflow(w)
+	e.worker().RegisterWorkflowWithOptions(w, workflow.RegisterOptions{
+		DisableAlreadyRegisteredCheck: true,
+	})
+}
+
+func (e *TestWorkflowEnvironment) RegisterWorkflowWithOptions(w any, options workflow.RegisterOptions) {
+	e.TestWorkflowEnvironment.RegisterWorkflowWithOptions(w, options)
+	if options.Name != "" {
+		fnName, _ := getFunctionName(w)
+		e.wfAliasRef[fnName] = options.Name
+	}
+	options.DisableAlreadyRegisteredCheck = true
+	e.worker().RegisterWorkflowWithOptions(w, options)
+}
+
 func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockCallWrapper {
 
-	name, _ := getFunctionName(workflowFn)
+	var name string
 
-	if _, ok := e.wfSignRef[name]; !ok {
-		e.wfSignRef[name] = workflowFn
+	if s, ok := workflowFn.(string); ok {
+		name = s
+	} else {
+		// do what the SDK does and register again
+		e.worker().RegisterWorkflowWithOptions(workflowFn, workflow.RegisterOptions{
+			DisableAlreadyRegisteredCheck: true,
+		})
+		name, _ = getFunctionName(workflowFn)
+		if alias, ok := e.wfAliasRef[name]; ok {
+			name = alias
+		}
 	}
+	// mark this workflow as mocked so interceptor can replace implementation
+	// using mock inputs and outputs
+	e.wfMocked[name] = struct{}{}
 
 	return &MockCallWrapper{
 		call:  e.workflowMock.On(name, args...),
@@ -166,10 +205,12 @@ func (e *TestWorkflowEnvironment) worker() worker.Worker {
 		e.w = worker.New(e.tclient, e.getTaskQueue(), worker.Options{
 			Interceptors: []interceptor.WorkerInterceptor{
 				&fastReplayInterceptor{taskQueue: e.getTaskQueue()},
-				&mockActivityInterceptor{
-					mock:      &e.activityMock,
-					stubFns:   e.actSignRef,
-					actMocked: e.actMocked,
+				&mockInterceptor{
+					actMock:    &e.activityMock,
+					wfMock:     &e.workflowMock,
+					actSignRef: e.actSignRef,
+					actMocked:  e.actMocked,
+					wfMocked:   e.wfMocked,
 				}},
 		})
 	}
@@ -184,13 +225,11 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	// it may be a good idea to use shared workers.
 	w := e.worker()
 	if _, ok := workflowFn.(string); !ok {
-		w.RegisterWorkflow(workflowFn)
+		w.RegisterWorkflowWithOptions(workflowFn, workflow.RegisterOptions{
+			DisableAlreadyRegisteredCheck: true,
+		})
 	}
 
-	// run mocked code
-	// todo: handle actual activities
-	// w.RegisterDynamicActivity(e.dynamicActivityHandler, activity.DynamicRegisterOptions{})
-	w.RegisterDynamicWorkflow(e.dynamicWorkflowHandler, workflow.DynamicRegisterOptions{})
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("start worker: %w", err)
 	}
@@ -233,34 +272,6 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	return nil
 }
 
-func (env *TestWorkflowEnvironment) dynamicWorkflowHandler(ctx workflow.Context, payloads converter.EncodedValues) (any, error) {
-	info := workflow.GetInfo(ctx)
-	wfType := info.WorkflowType.Name
-
-	// note that we return internalError so that it's clear if the dev server
-	// failed unexpectedly.
-	parent := info.ParentWorkflowExecution
-	if parent == nil {
-		return nil, internalError(fmt.Errorf("replaysuite: workflow %s has no parent; only mocked child workflows are served by the dynamic handler", wfType))
-	}
-
-	stubFn, ok := env.wfSignRef[wfType]
-	if !ok {
-		return nil, internalError(fmt.Errorf("replaysuite: no OnWorkflow stub for child workflow %s in workflow %s", wfType, parent.ID))
-	}
-
-	callArgs, err := decodePayloadsViaFnType(ctx, payloads, stubFn)
-	if err != nil {
-		return nil, internalError(fmt.Errorf("decode payloads for child workflow %s: %w", wfType, err))
-	}
-
-	rets, err := methodCalled(&env.workflowMock, wfType, callArgs)
-	if err != nil {
-		return nil, internalError(fmt.Errorf("replaysuite: child workflow %s: %w", wfType, err))
-	}
-	return extractReturn(rets)
-}
-
 func (env *TestWorkflowEnvironment) getTaskQueue() string {
 	if env.taskQueue == "" {
 		env.taskQueue = uuid.NewString()
@@ -283,46 +294,6 @@ func methodCalled(m *mock.Mock, name string, args []any) (rets mock.Arguments, e
 		}
 	}()
 	return m.MethodCalled(name, args...), nil
-}
-
-// decodePayloadsViaFnType decodes payloads into the argument types of fn. If
-// fn takes a context as its first argument, ctx is prepended to the result.
-func decodePayloadsViaFnType(ctx any, payloads converter.EncodedValues, fn any) ([]any, error) {
-	fnType := reflect.TypeOf(fn)
-	if fnType.Kind() != reflect.Func {
-		return nil, fmt.Errorf("not a function")
-	}
-	ctxType := reflect.TypeFor[context.Context]()
-	wfCtxType := reflect.TypeFor[workflow.Context]()
-
-	startIdx := 0
-	if fnType.NumIn() > 0 {
-		if first := fnType.In(0); first.Implements(ctxType) || first.Implements(wfCtxType) {
-			startIdx = 1
-		}
-	}
-	argCount := fnType.NumIn() - startIdx
-	ptrs := make([]any, argCount)
-	values := make([]reflect.Value, argCount)
-	for i := range argCount {
-		t := fnType.In(i + startIdx)
-		v := reflect.New(t)
-		ptrs[i] = v.Interface()
-		values[i] = v
-	}
-	if argCount > 0 {
-		if err := payloads.Get(ptrs...); err != nil {
-			return nil, err
-		}
-	}
-	out := make([]any, 0, startIdx+argCount)
-	if startIdx == 1 {
-		out = append(out, ctx)
-	}
-	for _, v := range values {
-		out = append(out, v.Elem().Interface())
-	}
-	return out, nil
 }
 
 // getFunctionName is a straight copy from what Go SDK does.

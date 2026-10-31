@@ -8,10 +8,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/interceptor"
+	"go.temporal.io/sdk/workflow"
 )
 
-// mockActivityInterceptor returns the mocked result for activities that have
-// an OnActivity expectation, and runs the registered activity otherwise.
+// mockInterceptor returns the mocked result for activities and workflows that
+// have an OnActivity or OnWorkflow expectation, and runs the registered
+// implementation otherwise.
 //
 // The reason for this is to simplify handling activities that are registered
 // to the test suite, but aren't mocked. Initially I used a dynamic handler to
@@ -22,19 +24,52 @@ import (
 //
 // Additionally, it's no longer necessary to actually build the mock's arguments
 // anymore, since they come directly from the interceptor function.
-type mockActivityInterceptor struct {
+type mockInterceptor struct {
 	interceptor.WorkerInterceptorBase
-	mock      *mock.Mock
-	stubFns   map[string]any
-	actMocked map[string]struct{}
+	actMock    *mock.Mock
+	wfMock     *mock.Mock
+	actSignRef map[string]any
+	actMocked  map[string]struct{}
+	wfMocked   map[string]struct{}
 }
 
-func (i *mockActivityInterceptor) InterceptActivity(
+func (i *mockInterceptor) InterceptActivity(
 	ctx context.Context, next interceptor.ActivityInboundInterceptor,
 ) interceptor.ActivityInboundInterceptor {
-	in := &mockActivityInbound{mock: i.mock, actSignRef: i.stubFns, actMocked: i.actMocked}
+	in := &mockActivityInbound{mock: i.actMock, actSignRef: i.actSignRef, actMocked: i.actMocked}
 	in.Next = next
 	return in
+}
+
+func (i *mockInterceptor) InterceptWorkflow(
+	ctx workflow.Context, next interceptor.WorkflowInboundInterceptor,
+) interceptor.WorkflowInboundInterceptor {
+	in := &mockWorkflowInbound{mock: i.wfMock, wfMocked: i.wfMocked}
+	in.Next = next
+	return in
+}
+
+type mockWorkflowInbound struct {
+	interceptor.WorkflowInboundInterceptorBase
+	mock     *mock.Mock
+	wfMocked map[string]struct{}
+}
+
+func (in *mockWorkflowInbound) ExecuteWorkflow(
+	ctx workflow.Context, input *interceptor.ExecuteWorkflowInput,
+) (any, error) {
+
+	name := workflow.GetInfo(ctx).WorkflowType.Name
+
+	if _, ok := in.wfMocked[name]; ok {
+		rets, err := methodCalled(in.mock, name, append([]any{ctx}, input.Args...))
+		if err != nil {
+			return nil, internalError(fmt.Errorf("replaysuite: workflow %s: %w", name, err))
+		}
+		return extractReturn(rets)
+	}
+
+	return in.Next.ExecuteWorkflow(ctx, input)
 }
 
 type mockActivityInbound struct {

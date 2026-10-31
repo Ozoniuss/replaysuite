@@ -112,6 +112,26 @@ func WorkflowWithStruct(ctx workflow.Context, name string) (BranchResult, error)
 	}, nil
 }
 
+func ParentWorkflow(ctx workflow.Context, name string) (string, error) {
+	var result string
+	if err := workflow.ExecuteChildWorkflow(ctx, ChildWorkflow, name).Get(ctx, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func ChildWorkflow(ctx workflow.Context, name string) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
+	})
+
+	var echoName string
+	if err := workflow.ExecuteActivity(ctx, EchoName, name).Get(ctx, &echoName); err != nil {
+		return "", err
+	}
+	return echoName, nil
+}
+
 type Activities struct {
 }
 

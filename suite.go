@@ -44,7 +44,6 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		// hack: currently Start() must be called before NewTestWorkflowEnvironment
 		tclient:           s.client,
 		actSignRef: map[string]any{},
-		wfSignRef: map[string]any{},
 		dumpHistory:       dumpSingleHistory,
 	}
 }

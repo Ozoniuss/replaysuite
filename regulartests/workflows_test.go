@@ -399,3 +399,50 @@ func Test_Workflow_StructRegistrationNameIsUsedAsPrefix(t *testing.T) {
 	require.ErrorContains(t, env.GetWorkflowError(), "unable to find activityType=EchoName")
 	require.ErrorContains(t, env.GetWorkflowError(), "PrefixEchoName")
 }
+
+func Test_Workflow_MockedChildWorkflowDoesNotRun(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+
+	var echoNameRuns atomic.Int32
+
+	env.OnWorkflow(ChildWorkflow, mock.Anything, Branch1Word).Return("Other word", nil)
+	env.OnActivity(EchoName, mock.Anything, Branch1Word).Return(func(context.Context, string) (string, error) {
+		echoNameRuns.Add(1)
+		return Branch1Word, nil
+	}).Never()
+
+	env.ExecuteWorkflow(ParentWorkflow, Branch1Word)
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result string
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, "Other word", result)
+	env.AssertWorkflowNumberOfCalls(t, "ChildWorkflow", 1)
+	assert.Equal(t, int32(0), echoNameRuns.Load())
+}
+
+func Test_Workflow_UnmockedChildWorkflowRuns(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterWorkflow(ChildWorkflow)
+
+	var echoNameRuns atomic.Int32
+
+	env.OnActivity(EchoName, mock.Anything, Branch1Word).Return(func(context.Context, string) (string, error) {
+		echoNameRuns.Add(1)
+		return "Other word", nil
+	}).Once()
+
+	env.ExecuteWorkflow(ParentWorkflow, Branch1Word)
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result string
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, "Other word", result)
+	assert.Equal(t, int32(1), echoNameRuns.Load())
+}
