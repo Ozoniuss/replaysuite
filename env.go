@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -24,8 +25,10 @@ import (
 )
 
 // TestWorkflowEnvironment is a wrapper around *testsuite.TestWorkflowEnvironment
-// that simulates real workflow execitions on a temporal cluster. Existing tests
-// will continue working as expected.
+// that also runs your unit tests against a real cluster and produces history
+// files from those executions that can be used for replay testing.
+//
+// Existing tests will continue working as expected.
 //
 // Note that in order to use the replay suite, you must use this instead of the
 // original *testsuite.TestWorkflowEnvironment.
@@ -52,8 +55,6 @@ type TestWorkflowEnvironment struct {
 	actAliasRef map[string]string
 	wfAliasRef  map[string]string
 
-	dumpHistory dumpHistoryFn
-
 	// only populated after execution on dev server completes.
 	workflowHistoryResult *historypb.History
 
@@ -64,20 +65,12 @@ type TestWorkflowEnvironment struct {
 
 	// report mirror server failure to test suite
 	t *testing.T
+
+	hw HistoryWriter
+	he HistoryEncoder
 }
 
 type dumpHistoryFn func(wfType, wfId string, hist *historypb.History) error
-
-type HistoryEncoder func(hist *historypb.History) ([]byte, error)
-
-// currently use wfType and wfID to infer where to write.
-//
-// TODO: if a workflow is defined twice with the same name in different
-// packages it may be difficult to figure out what you actually need to replay.
-// Should probably add an identifier to the test suite that will be used in the
-// path that can later be used by the replayer. I don't have a good design for
-// this yet.
-type HistoryWriter func(ctx context.Context, wfType, wfID string, data []byte) error
 
 func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
@@ -263,9 +256,15 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 
 	wfType, _ := getFunctionName(workflowFn)
-	err = e.dumpHistory(wfType, wfID, hist)
+	// this will likely change and be part of history writer
+	path := filepath.Join(defaultHistoriesDir, sanitize(wfType), wfID+".json")
+	hb, err := e.he.Encode(hist)
 	if err != nil {
-		return fmt.Errorf("dump history: %w", err)
+		return fmt.Errorf("encoding history: %w", err)
+	}
+	err = e.hw.Write(ctx, path, hb)
+	if err != nil {
+		return fmt.Errorf("writing history: %w", err)
 	}
 	e.workflowHistoryResult = hist
 

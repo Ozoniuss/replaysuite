@@ -1,0 +1,47 @@
+[
+  {
+    "payloads": [
+      {
+        "metadata": {
+          "encoding": "anNvbi9wbGFpbg=="
+        },
+        "data": "InZhbHVlOjci"
+      },
+      {
+        "metadata": {
+          "encoding": "anNvbi9wbGFpbg=="
+        },
+        "data": "Nw=="
+      },
+      {
+        "metadata": {
+          "encoding": "YmluYXJ5L251bGw="
+        }
+      }
+    ]
+  },
+  {
+    "payloads": [
+      {
+        "metadata": {
+          "encoding": "anNvbi9wbGFpbg=="
+        },
+        "data": "InZhbHVlOjci",
+        "__replaysuite_decodedData": "value:7"
+      },
+      {
+        "metadata": {
+          "encoding": "anNvbi9wbGFpbg=="
+        },
+        "data": "Nw==",
+        "__replaysuite_decodedData": 7
+      },
+      {
+        "metadata": {
+          "encoding": "YmluYXJ5L251bGw="
+        },
+        "__replaysuite_decodedData": null
+      }
+    ]
+  }
+]
