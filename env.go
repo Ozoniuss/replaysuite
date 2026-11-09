@@ -70,8 +70,6 @@ type TestWorkflowEnvironment struct {
 	he HistoryEncoder
 }
 
-type dumpHistoryFn func(wfType, wfId string, hist *historypb.History) error
-
 func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
 	e.TestWorkflowEnvironment.ExecuteWorkflow(workflowFn, args...)
 
