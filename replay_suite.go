@@ -39,19 +39,19 @@ func workflowKey(w any) string {
 	return strings.TrimSuffix(fullName, "-fm")
 }
 
-// this needs to be completely re-written, copied here to have the template.
 func replayAndDeleteHistories(
-	workflowType string,
+	workflowIdentifier string,
 	workflowFn any,
+	historiesPath string,
 ) error {
 
-	dir := filepath.Join(defaultHistoriesDir, sanitize(workflowType))
+	dir := filepath.Join(defaultHistoriesDir, sanitize(workflowIdentifier))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read histories for workflow %s: %w", workflowType, err)
+		return fmt.Errorf("read histories for workflow %s: %w", workflowIdentifier, err)
 	}
 
 	var historyFiles []string

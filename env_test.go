@@ -118,6 +118,7 @@ func newTestEnv(t *testing.T, s testsuite.WorkflowTestSuite) *TestWorkflowEnviro
 		wfAliasRef:              map[string]string{},
 		hw:                      NewDefaultHistoryWriter(),
 		he:                      NewDefaultHistoryEncoder(),
+		historiesDir:            defaultHistoriesDir,
 	}
 }
 

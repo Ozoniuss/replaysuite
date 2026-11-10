@@ -68,6 +68,8 @@ type TestWorkflowEnvironment struct {
 
 	hw HistoryWriter
 	he HistoryEncoder
+
+	historiesDir string
 }
 
 func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
@@ -253,9 +255,12 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 		hist.Events = append(hist.Events, ev)
 	}
 
-	wfType, _ := getFunctionName(workflowFn)
+	key, ok := workflowFn.(string)
+	if !ok {
+		key = workflowKey(workflowFn)
+	}
 	// this will likely change and be part of history writer
-	path := filepath.Join(defaultHistoriesDir, sanitize(wfType), wfID+".json")
+	path := filepath.Join(e.historiesDir, sanitize(key), wfID+".json")
 	hb, err := e.he.Encode(hist)
 	if err != nil {
 		return fmt.Errorf("encoding history: %w", err)
