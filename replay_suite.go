@@ -2,13 +2,15 @@ package replaysuite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 
 	"go.temporal.io/sdk/worker"
@@ -27,11 +29,12 @@ func (s *ReplaySuite) Register(w any) {
 	if s.workflows == nil {
 		s.workflows = make(map[string]any)
 	}
-	key := workflowKey(w)
+	key := sanitize(workflowKey(w))
 	if _, ok := s.workflows[key]; ok {
 		panic(fmt.Sprintf("a workflow resolving to identifier %q is already registered", key))
 	}
 	s.workflows[key] = w
+	fmt.Println(key)
 }
 
 // maybe strip root package prefix
@@ -40,43 +43,33 @@ func workflowKey(w any) string {
 	return strings.TrimSuffix(fullName, "-fm")
 }
 
-func replayAndDeleteHistories(
-	workflowIdentifier string,
-	workflowFn any,
-	historiesPath string,
-) error {
+func (s *ReplaySuite) Replay() error {
+	root := filepath.Join(os.Getenv("REPLAY_SUITE_HISTORIES_DIR"), defaultHistoriesDir)
 
-	dir := filepath.Join(defaultHistoriesDir, sanitize(workflowIdentifier))
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read histories for workflow %s: %w", workflowIdentifier, err)
-	}
-
-	var historyFiles []string
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+	var errs []error
+	for _, key := range slices.Sorted(maps.Keys(s.workflows)) {
+		dir := filepath.Join(root, key)
+		entries, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
 			continue
 		}
-		historyFiles = append(historyFiles, filepath.Join(dir, entry.Name()))
-	}
-	if len(historyFiles) == 0 {
-		return nil
-	}
-	sort.Strings(historyFiles)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read histories for workflow %s: %w", key, err))
+			continue
+		}
 
-	replayer := worker.NewWorkflowReplayer()
-	replayer.RegisterWorkflow(workflowFn)
+		replayer := worker.NewWorkflowReplayer()
+		replayer.RegisterWorkflow(s.workflows[key])
 
-	for _, historyFile := range historyFiles {
-		if err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, historyFile); err != nil {
-			return fmt.Errorf("replay %s: %w", historyFile, err)
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+				continue
+			}
+			historyFile := filepath.Join(dir, entry.Name())
+			if err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, historyFile); err != nil {
+				errs = append(errs, fmt.Errorf("replay %s: %w", historyFile, err))
+			}
 		}
 	}
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("delete replayed histories: %w", err)
-	}
-	return nil
+	return errors.Join(errs...)
 }
