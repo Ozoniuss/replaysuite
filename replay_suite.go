@@ -34,6 +34,7 @@ func (s *ReplaySuite) Register(w any) {
 	s.workflows[key] = w
 }
 
+// maybe strip root package prefix
 func workflowKey(w any) string {
 	fullName := runtime.FuncForPC(reflect.ValueOf(w).Pointer()).Name()
 	return strings.TrimSuffix(fullName, "-fm")

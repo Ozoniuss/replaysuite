@@ -12,3 +12,9 @@ execution
 - figure out a better way to handle workflow tasks in between child workflow
 executions in test
 - if a workflow is defined twice with the same name in different packages it may be difficult to figure out what you actually need to replay. Should probably add an identifier to the test suite that will be used in the path that can later be used by the replayer. I don't have a good design for this yet.
+
+Maybe:
+
+- strip the root module prefix from workflow keys using
+`debug.ReadBuildInfo().Main.Path`, so renaming the module doesn't change every
+key. Workflows from other modules would keep their full path.

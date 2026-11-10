@@ -3,6 +3,8 @@ package replaysuite
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/testsuite"
@@ -34,7 +36,7 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		wfAliasRef:   map[string]string{},
 		hw:           NewDefaultHistoryWriter(),
 		he:           NewDefaultHistoryEncoder(),
-		historiesDir: defaultHistoriesDir,
+		historiesDir: filepath.Join(os.Getenv("REPLAY_SUITE_HISTORIES_DIR"), defaultHistoriesDir),
 	}
 }
 
