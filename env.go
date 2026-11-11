@@ -260,7 +260,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 		key = workflowKey(workflowFn)
 	}
 	// this will likely change and be part of history writer
-	path := filepath.Join(e.historiesDir, sanitize(key), wfID+".json")
+	path := filepath.Join(e.historiesDir, key, wfID+".json")
 	hb, err := e.he.Encode(hist)
 	if err != nil {
 		return fmt.Errorf("encoding history: %w", err)

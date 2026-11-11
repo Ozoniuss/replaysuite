@@ -166,5 +166,3 @@ func decodePayloadData(payload map[string]any) (any, bool) {
 		return nil, false
 	}
 }
-
-func sanitize(s string) string { return strings.ReplaceAll(s, "/", "_") }

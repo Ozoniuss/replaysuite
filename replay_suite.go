@@ -8,10 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
-	"runtime"
 	"slices"
-	"strings"
 
 	"go.temporal.io/sdk/worker"
 )
@@ -29,18 +26,12 @@ func (s *ReplaySuite) Register(w any) {
 	if s.workflows == nil {
 		s.workflows = make(map[string]any)
 	}
-	key := sanitize(workflowKey(w))
+	key := workflowKey(w)
 	if _, ok := s.workflows[key]; ok {
 		panic(fmt.Sprintf("a workflow resolving to identifier %q is already registered", key))
 	}
 	s.workflows[key] = w
 	fmt.Println(key)
-}
-
-// maybe strip root package prefix
-func workflowKey(w any) string {
-	fullName := runtime.FuncForPC(reflect.ValueOf(w).Pointer()).Name()
-	return strings.TrimSuffix(fullName, "-fm")
 }
 
 func (s *ReplaySuite) Replay() error {

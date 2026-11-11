@@ -18,3 +18,7 @@ Maybe:
 - strip the root module prefix from workflow keys using
 `debug.ReadBuildInfo().Main.Path`, so renaming the module doesn't change every
 key. Workflows from other modules would keep their full path.
+- if CI only runs some workflow tests, merge the history archive per workflow
+folder instead of replacing it. A workflow tested from several packages would
+lose the histories from packages that didn't run, unless files are keyed by test
+package.
