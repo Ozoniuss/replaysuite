@@ -58,7 +58,10 @@ type TestWorkflowEnvironment struct {
 	// only populated after execution on dev server completes.
 	workflowHistoryResult *historypb.History
 
-	// all workflows and activities on the dev server will use this task queue
+	// All workflows and activities on the dev server will use this task queue.
+	//
+	// It is recommended to not set this value, otherwise two workflows with the
+	// same name in different packages risk having their execution interleaved.
 	taskQueue string
 
 	w worker.Worker
