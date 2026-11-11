@@ -22,3 +22,6 @@ key. Workflows from other modules would keep their full path.
 folder instead of replacing it. A workflow tested from several packages would
 lose the histories from packages that didn't run, unless files are keyed by test
 package.
+- configurable task queue and namespace via env vars.
+- likely running the same workflow from multiple packages requires care in terms
+of the task quuee being used.

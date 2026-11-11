@@ -10,11 +10,23 @@ import (
 	"go.temporal.io/sdk/testsuite"
 )
 
-// WorkflowTestSuite is a drop-in replacement for testsuite.WorkflowTestSuite.
-// In addition to the normal in-process  unit-test execution, each workflow runs
-// against a real dev which produces event histories that can be used for replay
-// testing. Existing tests written against *testsuite.TestWorkflowEnvironment keep
-// working as-is.
+// WorkflowTestSuite is a wrapper around temporal's WorkflowTestSuite. Because
+// TestWorkflowEnvironment is constructed via WorkflowTestSuite, you must use
+// the wrapper instead of the regular testsuite.WorkflowTestSuite in order to
+// start the replay test environment and generate histories.
+//
+// Most of the times, this should be a drop-in replacement, since the test
+// environment behavior can be controlled via environment variables. However,
+// WorkflowTestSuite also exposes some additional methods if you want to
+// explicitly control the behavior of the test suite.
+//
+// It is safe to run multiple workflow test suites against the same temporal
+// server, assuming it is not already active and has other executions from
+// different sources. When running against an active server, make sure there
+// are no conflicting registrations int the same namespace and task queue.
+
+// Make sure the namespace exists when running against an external temporal
+// server.
 type WorkflowTestSuite struct {
 	testsuite.WorkflowTestSuite
 
@@ -40,7 +52,11 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 	}
 }
 
-// Start starts the dev server.
+// Start will spin up a temporal server managed by the test process.
+//
+// It is recommended to run the tests against a local temporal server managed
+// externally to the test suite. Otherwise, every workflow test suite will have
+// to spin up and tear down a temporal server installation.
 func (s *WorkflowTestSuite) Start() error {
 	if s.started {
 		return nil
@@ -65,7 +81,7 @@ func (s *WorkflowTestSuite) Start() error {
 	return nil
 }
 
-// Stop tears down the dev server.
+// Stop tears down the temporal server started via Start().
 func (s *WorkflowTestSuite) Stop() error {
 	if s.client != nil {
 		s.client.Close()
