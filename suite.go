@@ -3,11 +3,17 @@ package replaysuite
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/testsuite"
+)
+
+const (
+	EnvTemporalServerHostport = "REPLAY_SUITE_TEMPORAL_SERVER_HOSTPORT"
 )
 
 // WorkflowTestSuite is a wrapper around temporal's WorkflowTestSuite. Because
@@ -37,18 +43,34 @@ type WorkflowTestSuite struct {
 }
 
 func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironment {
+
+	// When this env is supplied, test workflow environment will create a client
+	// connecting to that temporal server. This allows preserving existing calls
+	// to NewTestWorkflowEnvironment() without any changes except the import
+	// path.
+	if hostport := os.Getenv(EnvTemporalServerHostport); hostport != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		tc, err := client.DialContext(ctx, client.Options{
+			HostPort: hostport,
+		})
+		if err != nil {
+			panic(fmt.Sprintf("dial temporal client: %s", err.Error()))
+		}
+		s.client = tc
+	}
+
 	return &TestWorkflowEnvironment{
 		TestWorkflowEnvironment: s.WorkflowTestSuite.NewTestWorkflowEnvironment(),
-		// hack: currently Start() must be called before NewTestWorkflowEnvironment
-		tclient:      s.client,
-		actSignRef:   map[string]any{},
-		actMocked:    map[string]struct{}{},
-		wfMocked:     map[string]struct{}{},
-		actAliasRef:  map[string]string{},
-		wfAliasRef:   map[string]string{},
-		hw:           NewDefaultHistoryWriter(),
-		he:           NewDefaultHistoryEncoder(),
-		historiesDir: filepath.Join(os.Getenv("REPLAY_SUITE_HISTORIES_DIR"), defaultHistoriesDir),
+		tclient:                 s.client,
+		actSignRef:              map[string]any{},
+		actMocked:               map[string]struct{}{},
+		wfMocked:                map[string]struct{}{},
+		actAliasRef:             map[string]string{},
+		wfAliasRef:              map[string]string{},
+		hw:                      NewDefaultHistoryWriter(),
+		he:                      NewDefaultHistoryEncoder(),
+		historiesDir:            filepath.Join(os.Getenv("REPLAY_SUITE_HISTORIES_DIR"), defaultHistoriesDir),
 	}
 }
 
@@ -57,8 +79,31 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 // It is recommended to run the tests against a local temporal server managed
 // externally to the test suite. Otherwise, every workflow test suite will have
 // to spin up and tear down a temporal server installation.
+//
+// Note: calling Start() without calling Stop() will leave a temporal dev server
+// process running. This can happen e.g. with unhandled panics, like the example
+// below:
+//
+// func TestMain(m *testing.M) {
+// 	if err := suite.Start(); err != nil {
+// 		fmt.Fprintf(os.Stderr, "failed to start suite: %s", err.Error())
+// 		os.Exit(1)
+// 	}
+// 	code := m.Run()
+// 	_ = suite.Stop()
+// 	os.Exit(code)
+// }
+
+//	func TestSampleWorkflow(t *testing.T) {
+//	  // this test panics, without a recover
+//	}
+//
+// The wrappers below should make the dev server crash on the first write with
+// SIGPIPE which should happen fairly quickly.
 func (s *WorkflowTestSuite) Start() error {
-	if s.started {
+
+	// skip starting a test server when we want to connect to a real one
+	if os.Getenv(EnvTemporalServerHostport) != "" {
 		return nil
 	}
 
@@ -66,6 +111,13 @@ func (s *WorkflowTestSuite) Start() error {
 	// spins up an in-process temporal cluster and a shared worker and
 	// registers all workflows and activities on that shared worker.
 	srv, err := testsuite.StartDevServer(context.Background(), testsuite.DevServerOptions{
+		// make the tests fail write away in case the test suite panics. this
+		// wrapper will avoid leaving a running server when a test that panicked
+		// did not call Stop().
+		//
+		// https://github.com/golang/go/blob/go1.26.6/src/os/exec/exec.go#L580-L610
+		Stdout: struct{ io.Writer }{os.Stdout},
+		Stderr: struct{ io.Writer }{os.Stderr},
 		// Without this option, the minimum duration of a timer or a retry seems
 		// to be capped at 1s.
 		ExtraArgs: []string{
@@ -77,7 +129,6 @@ func (s *WorkflowTestSuite) Start() error {
 	}
 	s.server = srv
 	s.client = srv.Client()
-	s.started = true
 	return nil
 }
 
