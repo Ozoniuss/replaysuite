@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	EnvTemporalServerHostport = "REPLAY_SUITE_TEMPORAL_SERVER_HOSTPORT"
+	envTemporalServerHostport = "REPLAY_SUITE_TEMPORAL_SERVER_HOSTPORT"
+	envHistoriesDir           = "REPLAY_SUITE_HISTORIES_DIR"
 )
 
 // WorkflowTestSuite is a wrapper around temporal's WorkflowTestSuite. Because
@@ -48,7 +49,7 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 	// connecting to that temporal server. This allows preserving existing calls
 	// to NewTestWorkflowEnvironment() without any changes except the import
 	// path.
-	if hostport := os.Getenv(EnvTemporalServerHostport); hostport != "" {
+	if hostport := os.Getenv(envTemporalServerHostport); hostport != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		tc, err := client.DialContext(ctx, client.Options{
@@ -58,6 +59,11 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 			panic(fmt.Sprintf("dial temporal client: %s", err.Error()))
 		}
 		s.client = tc
+	}
+
+	historiesDir := defaultHistoriesDir
+	if hd := os.Getenv(envHistoriesDir); hd != "" {
+		historiesDir = filepath.Join(hd, defaultHistoriesDir)
 	}
 
 	return &TestWorkflowEnvironment{
@@ -70,7 +76,7 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		wfAliasRef:              map[string]string{},
 		hw:                      NewDefaultHistoryWriter(),
 		he:                      NewDefaultHistoryEncoder(),
-		historiesDir:            filepath.Join(os.Getenv("REPLAY_SUITE_HISTORIES_DIR"), defaultHistoriesDir),
+		historiesDir:            historiesDir,
 	}
 }
 
@@ -103,7 +109,7 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 func (s *WorkflowTestSuite) Start() error {
 
 	// skip starting a test server when we want to connect to a real one
-	if os.Getenv(EnvTemporalServerHostport) != "" {
+	if os.Getenv(envTemporalServerHostport) != "" {
 		return nil
 	}
 

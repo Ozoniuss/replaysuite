@@ -35,7 +35,9 @@ func (s *ReplaySuite) Register(w any) {
 }
 
 func (s *ReplaySuite) Replay() error {
-	root := filepath.Join(os.Getenv("REPLAY_SUITE_HISTORIES_DIR"), defaultHistoriesDir)
+
+	// TODO: replace with target download.
+	root := filepath.Join(os.Getenv(envHistoriesDir), defaultHistoriesDir)
 
 	var errs []error
 	for _, key := range slices.Sorted(maps.Keys(s.workflows)) {
