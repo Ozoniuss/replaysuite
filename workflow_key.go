@@ -7,7 +7,12 @@ import (
 )
 
 // workflowKey gives a stable identifier for a workflow defined in one Go
-// package. This identifier can be used as a file name.
+// package. The purpose of this identifier is to allow associating a certain
+// history record with a particular workflow that we need to replay against.
+// Since a go package does not allow having two functions with the same name,
+// this will produce a different workflow identifier for each workflow function.
+//
+// This identifier can be used as a file name.
 //
 // See https://pkg.go.dev/go.temporal.io/sdk/workflow#hdr-Declaration to
 // understand what can be a workflow.

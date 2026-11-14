@@ -2,7 +2,6 @@ package replaysuite
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -19,29 +18,7 @@ const (
 	decodedPayloadDataJSONKey = "__replaysuite_decodedData"
 )
 
-// HistoryEncoder converts event histories to bytes.
-type HistoryEncoder interface {
-	Encode(hist *historypb.History) ([]byte, error)
-}
-
-// HistoryWriter writes encoded event histories to some storage destination.
-type HistoryWriter interface {
-	Write(ctx context.Context, path string, data []byte) error
-}
-
-func NewDefaultHistoryWriter() HistoryWriter {
-	return localDiskHistoryWriter{}
-}
-
-func NewDefaultHistoryEncoder() HistoryEncoder {
-	return jsonHistoryEncoder{}
-}
-
-type jsonHistoryEncoder struct{}
-
-var _ HistoryEncoder = jsonHistoryEncoder{}
-
-func (jsonHistoryEncoder) Encode(hist *historypb.History) ([]byte, error) {
+func encodeHistory(hist *historypb.History) ([]byte, error) {
 
 	// convert history to any so that it's easier to annotate history, e.g.
 	// add custom fields for decoded data or worker identity redaction
@@ -65,11 +42,7 @@ func (jsonHistoryEncoder) Encode(hist *historypb.History) ([]byte, error) {
 	return json.MarshalIndent(value, "", "  ")
 }
 
-type localDiskHistoryWriter struct{}
-
-var _ HistoryWriter = localDiskHistoryWriter{}
-
-func (localDiskHistoryWriter) Write(_ context.Context, path string, data []byte) error {
+func writeHistory(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create location %s: %w", path, err)
 	}

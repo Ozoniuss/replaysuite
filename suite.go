@@ -74,8 +74,6 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		wfMocked:                map[string]struct{}{},
 		actAliasRef:             map[string]string{},
 		wfAliasRef:              map[string]string{},
-		hw:                      NewDefaultHistoryWriter(),
-		he:                      NewDefaultHistoryEncoder(),
 		historiesDir:            historiesDir,
 	}
 }

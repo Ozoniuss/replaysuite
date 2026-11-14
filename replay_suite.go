@@ -1,10 +1,8 @@
 package replaysuite
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,11 +10,6 @@ import (
 
 	"go.temporal.io/sdk/worker"
 )
-
-type HistoryArchiveStore interface {
-	Download(ctx context.Context) (io.ReadCloser, error)
-	Upload(ctx context.Context, archive io.Reader) error
-}
 
 type ReplaySuite struct {
 	workflows map[string]any

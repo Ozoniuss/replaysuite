@@ -116,8 +116,6 @@ func newTestEnv(t *testing.T, s testsuite.WorkflowTestSuite) *TestWorkflowEnviro
 		wfMocked:                map[string]struct{}{},
 		actAliasRef:             map[string]string{},
 		wfAliasRef:              map[string]string{},
-		hw:                      NewDefaultHistoryWriter(),
-		he:                      NewDefaultHistoryEncoder(),
 		historiesDir:            defaultHistoriesDir,
 	}
 }

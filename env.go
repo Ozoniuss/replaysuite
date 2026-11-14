@@ -28,6 +28,10 @@ import (
 // that also runs your unit tests against a real cluster and produces history
 // files from those executions that can be used for replay testing.
 //
+// All histories files will be written to a folder on the local disk. Each
+// history will be written in a subfolder whose name is uniquely associated with
+// the workflow function.
+//
 // Existing tests will continue working as expected.
 //
 // Note that in order to use the replay suite, you must use this instead of the
@@ -69,9 +73,7 @@ type TestWorkflowEnvironment struct {
 	// report mirror server failure to test suite
 	t *testing.T
 
-	hw HistoryWriter
-	he HistoryEncoder
-
+	// the directory where all workflow histories are written.
 	historiesDir string
 }
 
@@ -264,11 +266,11 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 	// this will likely change and be part of history writer
 	path := filepath.Join(e.historiesDir, key, wfID+".json")
-	hb, err := e.he.Encode(hist)
+	hb, err := encodeHistory(hist)
 	if err != nil {
 		return fmt.Errorf("encoding history: %w", err)
 	}
-	err = e.hw.Write(ctx, path, hb)
+	err = writeHistory(path, hb)
 	if err != nil {
 		return fmt.Errorf("writing history: %w", err)
 	}

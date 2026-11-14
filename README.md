@@ -5,6 +5,18 @@
 Generate event histories for your workflow using your unit test suite, and use
 them to write replay tests.
 
+## Generating histories from unit tests
+
+This package provides `replaysuite.TestWorkflowEnvironment` as a wrapper over
+Temporal's `TestWorkflowEnvironment` in order to generate history files. It does
+so by substituting the mocked implementation with a real one whose inputs and
+outputs match the mock and which runs against a Temporal server. The environment
+applies several optimizations to keep these executions short while not affecting
+the replay result.
+
+All histories will be written locally to a directory, in a format such that each
+execution can be identified with a specific workflow function.
+
 ## Limitations
 
 When activities are registered with a custom name, the Temporal SDK recommends
