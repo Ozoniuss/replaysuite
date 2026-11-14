@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func WriteArchive(w io.Writer, historiesDir string) error {
+func WriteArchiveFromHistories(w io.Writer, historiesDir string) error {
 	root, err := os.OpenRoot(historiesDir)
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", historiesDir, err)
