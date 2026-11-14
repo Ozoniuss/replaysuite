@@ -5,6 +5,18 @@
 Generate event histories for your workflow using your unit test suite, and use
 them to write replay tests.
 
+The idea behind it is that a theoretically complete test coverage should produce
+all possible event combinations that a given workflow can generate. Replay tests
+targeting executions from a production cluster run the risk that the history
+set may not be representative of all possible states the workflow could reach,
+and also two consecutive runs may produce different results if the set varies.
+This package aims to reduce that risk by providing a stable, varied set of
+histories to be used in replay tests that is cheap to generate and extend with
+minimal changes to your existing test suites. Obviously, in practice it's not
+always possible to produce all event sequences a workflow could generate, but
+a comprehensive unit test suite should provide a good enough coverage to detect
+workflow changes that may potentially result in non-deterministic errors.
+
 ## Generating histories from unit tests
 
 This package provides `replaysuite.TestWorkflowEnvironment` as a wrapper over

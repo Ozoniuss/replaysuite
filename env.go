@@ -241,10 +241,11 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	if err != nil {
 		return fmt.Errorf("execute workflow: %w", err)
 	}
-	// TODO: maybe the workflow errored somehow on dev server (e.g. missing
-	// activity policy). Figure out what to do there.
 	if err := run.Get(ctx, nil); err != nil {
 		var appErr *temporal.ApplicationError
+		// Capture errors caused by replaysuite itself to stop test execution.
+		// It is reasonable to see executionerrors in unit tests, so we skip
+		// those.
 		if errors.As(err, &appErr) && appErr.Type() == internalErrorType {
 			return fmt.Errorf("workflow failed due to replaysuite error: %w", err)
 		}
