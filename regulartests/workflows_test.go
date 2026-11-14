@@ -448,7 +448,7 @@ func Test_Workflow_UnmockedChildWorkflowRuns(t *testing.T) {
 	assert.Equal(t, int32(1), echoNameRuns.Load())
 }
 
-func Test_Workflow_ExecutingFuncRegisteredWithCustomNameUsesCustomName(t *testing.T) {
+func Test_Workflow_SingleRegistration_ExecutingFuncRegisteredWithCustomNameUsesCustomName(t *testing.T) {
 	t.Parallel()
 	s := testsuite.WorkflowTestSuite{}
 	env := s.NewTestWorkflowEnvironment()
@@ -465,7 +465,7 @@ func Test_Workflow_ExecutingFuncRegisteredWithCustomNameUsesCustomName(t *testin
 	assert.Equal(t, "AliasedWorkflowTypeName", result)
 }
 
-func Test_Workflow_ExecutingCustomNameRunsFuncRegisteredWithCustomName(t *testing.T) {
+func Test_Workflow_SingleRegistration_ExecutingCustomNameRunsFuncRegisteredWithCustomName(t *testing.T) {
 	t.Parallel()
 	s := testsuite.WorkflowTestSuite{}
 	env := s.NewTestWorkflowEnvironment()
@@ -492,7 +492,7 @@ func Test_Workflow_PanicsIfExecutingUnregisteredWorkflowName(t *testing.T) {
 	})
 }
 
-func Test_Workflow_ExecutingFuncRegisteredWithEmptyCustomNameUsesFuncName(t *testing.T) {
+func Test_Workflow_SingleRegistration_ExecutingFuncRegisteredWithEmptyCustomNameUsesFuncName(t *testing.T) {
 	t.Parallel()
 	s := testsuite.WorkflowTestSuite{}
 	env := s.NewTestWorkflowEnvironment()
@@ -509,7 +509,7 @@ func Test_Workflow_ExecutingFuncRegisteredWithEmptyCustomNameUsesFuncName(t *tes
 	assert.Equal(t, "WorkflowTypeThatIsAliased", result)
 }
 
-func Test_Workflow_ExecutingFuncNameRunsFuncRegisteredWithEmptyCustomName(t *testing.T) {
+func Test_Workflow_SingleRegistration_ExecutingFuncNameRunsFuncRegisteredWithEmptyCustomName(t *testing.T) {
 	t.Parallel()
 	s := testsuite.WorkflowTestSuite{}
 	env := s.NewTestWorkflowEnvironment()
@@ -526,7 +526,20 @@ func Test_Workflow_ExecutingFuncNameRunsFuncRegisteredWithEmptyCustomName(t *tes
 	assert.Equal(t, "WorkflowTypeThatIsAliased", result)
 }
 
-func Test_Workflow_FuncRegisteredWithAndWithoutCustomNameKeepsBothNames(t *testing.T) {
+func Test_Workflow_SingleRegistration_PanicsIfExecutingFuncNameOfFuncRegisteredWithCustomName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(WorkflowTypeThatIsAliased, workflow.RegisterOptions{
+		Name: "AliasedWorkflowTypeName",
+	})
+
+	require.PanicsWithError(t, "unable to find workflow type: WorkflowTypeThatIsAliased. Supported types: [AliasedWorkflowTypeName]", func() {
+		env.ExecuteWorkflow("WorkflowTypeThatIsAliased")
+	})
+}
+
+func Test_Workflow_DoubleRegistration_FuncRegisteredWithAndWithoutCustomNameKeepsBothNames(t *testing.T) {
 	t.Parallel()
 
 	registerPlain := func(env *testsuite.TestWorkflowEnvironment) {
