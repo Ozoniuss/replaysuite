@@ -1,6 +1,7 @@
 package example
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/Ozoniuss/replaysuite"
@@ -16,7 +17,11 @@ func TestReplay(t *testing.T) {
 	suite.Register(pck2.SampleWorkflow)
 	suite.Register(internalpck1.SampleWorkflow)
 
-	if err := suite.Replay(); err != nil {
+	var archive bytes.Buffer
+	if err := replaysuite.WriteArchiveFromHistories(&archive, ".histories"); err != nil {
+		t.Fatal(err)
+	}
+	if err := suite.Replay(&archive); err != nil {
 		t.Fatal(err)
 	}
 }
