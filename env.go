@@ -222,10 +222,24 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	// Start a new worker for each executed workflow. If this becomes expensive,
 	// it may be a good idea to use shared workers.
 	w := e.worker()
+
+	// If the workflow is registered with an alias, the client needs to start
+	// execution with that alias in order to match the alias workflow type,
+	// otherwise it will start an execution with the string representation
+	// of the function name.
+	//
+	// When workflowFn is already a string, the workflow test environment will
+	// panic without an explicit registration, so we need to do nothing there
+	// since we will already have a registration on the worker.
+	wf := workflowFn
 	if _, ok := workflowFn.(string); !ok {
 		w.RegisterWorkflowWithOptions(workflowFn, workflow.RegisterOptions{
 			DisableAlreadyRegisteredCheck: true,
 		})
+		fnName, _ := getFunctionName(workflowFn)
+		if alias, ok := e.wfAliasRef[fnName]; ok {
+			wf = alias
+		}
 	}
 
 	if err := w.Start(); err != nil {
@@ -237,7 +251,7 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	run, err := e.tclient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        wfID,
 		TaskQueue: e.getTaskQueue(),
-	}, workflowFn, args...)
+	}, wf, args...)
 	if err != nil {
 		return fmt.Errorf("execute workflow: %w", err)
 	}

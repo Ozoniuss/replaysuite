@@ -851,7 +851,7 @@ func ActivityNamedRegistration(ctx context.Context) error {
 	activity.GetLogger(ctx).Info(name)
 	return nil
 }
-func WorkflowNamedRegistration(ctx workflow.Context) error {
+func WorkflowNamedActivityRegistration(ctx workflow.Context) error {
 	name := workflow.GetInfo(ctx).WorkflowType.Name
 	logger := workflow.GetLogger(ctx)
 	logger.Info(name)
@@ -877,7 +877,7 @@ func TestEnvironment_NamedRegistration(t *testing.T) {
 	env.RegisterActivityWithOptions(ActivityNamedRegistration, activity.RegisterOptions{
 		Name: NamedRegistrationActivityName,
 	})
-	env.ExecuteWorkflow(WorkflowNamedRegistration)
+	env.ExecuteWorkflow(WorkflowNamedActivityRegistration)
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 
@@ -906,8 +906,127 @@ func TestEnvironment_NamedRegistration(t *testing.T) {
 		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
 	}, eventTypes)
 
-	require.Equal(t, "WorkflowNamedRegistration", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "WorkflowNamedActivityRegistration", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 	require.Equal(t, NamedRegistrationActivityName, hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+}
+
+// === Tested workflow registered with a custom name
+
+const WorkflowRegisteredWithAliasName = "AliasedWorkflow"
+
+var workflowRegisteredWithAliasCalls atomic.Int32
+
+func ActivityWorkflowRegisteredWithAlias(ctx context.Context) error {
+	workflowRegisteredWithAliasCalls.Add(1)
+	return nil
+}
+
+func WorkflowRegisteredWithAlias(ctx workflow.Context) (string, error) {
+	ctx = workflow.WithActivityOptions(
+		ctx, workflow.ActivityOptions{
+			ScheduleToCloseTimeout: 1 * time.Minute,
+		},
+	)
+
+	if err := workflow.ExecuteActivity(ctx, ActivityWorkflowRegisteredWithAlias).Get(ctx, nil); err != nil {
+		return "", err
+	}
+	return workflow.GetInfo(ctx).WorkflowType.Name, nil
+}
+
+func TestEnvironment_WorkflowRegisteredWithAlias(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.RegisterWorkflowWithOptions(WorkflowRegisteredWithAlias, workflow.RegisterOptions{
+		Name: WorkflowRegisteredWithAliasName,
+	})
+	env.RegisterActivity(ActivityWorkflowRegisteredWithAlias)
+	env.ExecuteWorkflow(WorkflowRegisteredWithAlias)
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, WorkflowRegisteredWithAliasName, envResult)
+
+	// The real activity runs once in the test environment and once on the dev
+	// server.
+	require.Equal(t, int32(2), workflowRegisteredWithAliasCalls.Load())
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, WorkflowRegisteredWithAliasName, hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	require.Equal(t, "ActivityWorkflowRegisteredWithAlias", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
+
+	var mirrorResult string
+	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[10].GetWorkflowExecutionCompletedEventAttributes().GetResult(), &mirrorResult))
+	require.Equal(t, WorkflowRegisteredWithAliasName, mirrorResult)
+}
+
+// === Workflow under test registered with a custom name and executed by that
+// name
+
+const WorkflowExecutedByAliasName = "AliasedExecutedWorkflow"
+
+func WorkflowExecutedByAlias(ctx workflow.Context) (string, error) {
+	return workflow.GetInfo(ctx).WorkflowType.Name, nil
+}
+
+func TestEnvironment_WorkflowExecutedByAlias(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.RegisterWorkflowWithOptions(WorkflowExecutedByAlias, workflow.RegisterOptions{
+		Name: WorkflowExecutedByAliasName,
+	})
+	env.ExecuteWorkflow(WorkflowExecutedByAliasName)
+	require.True(t, env.IsWorkflowCompleted())
+
+	var envResult string
+	require.NoError(t, env.GetWorkflowResult(&envResult))
+	require.Equal(t, WorkflowExecutedByAliasName, envResult)
+
+	hist := env.workflowHistoryResult
+	require.NotNil(t, hist)
+
+	eventTypes := make([]enumspb.EventType, 0, len(hist.Events))
+	for _, ev := range hist.Events {
+		eventTypes = append(eventTypes, ev.GetEventType())
+	}
+	require.Equal(t, []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}, eventTypes)
+
+	require.Equal(t, WorkflowExecutedByAliasName, hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+
+	var mirrorResult string
+	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[4].GetWorkflowExecutionCompletedEventAttributes().GetResult(), &mirrorResult))
+	require.Equal(t, WorkflowExecutedByAliasName, mirrorResult)
 }
 
 // === Mock via name, called via name in workflow, function itself has different
