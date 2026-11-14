@@ -17,6 +17,10 @@ always possible to produce all event sequences a workflow could generate, but
 a comprehensive unit test suite should provide a good enough coverage to detect
 workflow changes that may potentially result in non-deterministic errors.
 
+## Usage
+
+See an [example](./example/) on how to set up replay testing.
+
 ## Generating histories from unit tests
 
 This package provides `replaysuite.TestWorkflowEnvironment` as a wrapper over
