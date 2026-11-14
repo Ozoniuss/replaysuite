@@ -80,6 +80,13 @@ type TestWorkflowEnvironment struct {
 
 	// the directory where all workflow histories are written.
 	historiesDir string
+
+	// overrides the location where the workflow history is stored.
+	workflowFolder string
+}
+
+func (e *TestWorkflowEnvironment) SetWorkflowFolder(folder string) {
+	e.workflowFolder = folder
 }
 
 func (e *TestWorkflowEnvironment) ExecuteWorkflow(workflowFn any, args ...any) {
@@ -287,7 +294,11 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	}
 
 	// this will likely change and be part of history writer
-	path := filepath.Join(e.historiesDir, workflowKey(workflowFn), wfID+".json")
+	folder := workflowKey(workflowFn)
+	if e.workflowFolder != "" {
+		folder = workflowKey(e.workflowFolder)
+	}
+	path := filepath.Join(e.historiesDir, folder, wfID+".json")
 	hb, err := encodeHistory(hist)
 	if err != nil {
 		return fmt.Errorf("encoding history: %w", err)

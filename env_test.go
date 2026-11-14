@@ -2276,6 +2276,28 @@ func TestEnvironment_NamesAsClosures(t *testing.T) {
 	require.Equal(t, "func1", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 }
 
+// === Workflow history written to an explicitly set folder
+
+func WorkflowCustomFolder(ctx workflow.Context) error {
+	return nil
+}
+
+func TestEnvironment_SetWorkflowFolder(t *testing.T) {
+	t.Parallel()
+
+	s := testsuite.WorkflowTestSuite{}
+	env := newTestEnv(t, s)
+	env.historiesDir = t.TempDir()
+	env.SetWorkflowFolder("orders.Checkout")
+	env.ExecuteWorkflow(WorkflowCustomFolder)
+	require.True(t, env.IsWorkflowCompleted())
+
+	folders, err := os.ReadDir(env.historiesDir)
+	require.NoError(t, err)
+	require.Len(t, folders, 1)
+	require.Equal(t, "orders.Checkout", folders[0].Name())
+}
+
 func plainActivityForNameTest() error {
 	return nil
 }
