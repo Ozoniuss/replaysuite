@@ -17,6 +17,9 @@ import (
 // See https://pkg.go.dev/go.temporal.io/sdk/workflow#hdr-Declaration to
 // understand what can be a workflow.
 func workflowKey(w any) string {
-	fullName := runtime.FuncForPC(reflect.ValueOf(w).Pointer()).Name()
-	return strings.ReplaceAll(strings.TrimSuffix(fullName, "-fm"), "/", "_")
+	name, ok := w.(string)
+	if !ok {
+		name = strings.TrimSuffix(runtime.FuncForPC(reflect.ValueOf(w).Pointer()).Name(), "-fm")
+	}
+	return strings.ReplaceAll(name, "/", "_")
 }
