@@ -57,7 +57,12 @@ type TestWorkflowEnvironment struct {
 	//
 	// TODO: handle disabled aliasing
 	actAliasRef map[string]string
-	wfAliasRef  map[string]string
+
+	// Keep track of workflow registrations. Note that this will keep track of
+	// both aliased and non-aliased workflow registrations, since the name
+	// inferred from the function type will always be used as the workflow type
+	// in the replay suite (that function code is what is running anyway).
+	wfRegistrations map[string]wfRegistration
 
 	// only populated after execution on dev server completes.
 	workflowHistoryResult *historypb.History
@@ -154,8 +159,15 @@ func (e *TestWorkflowEnvironment) OnActivity(activityFnOrString any, args ...any
 	}
 }
 
+type wfRegistration struct {
+	fn    any
+	alias string
+}
+
 func (e *TestWorkflowEnvironment) RegisterWorkflow(w any) {
 	e.TestWorkflowEnvironment.RegisterWorkflow(w)
+	fnName, _ := getFunctionName(w)
+	e.wfRegistrations[fnName] = wfRegistration{fn: w}
 	e.worker().RegisterWorkflowWithOptions(w, workflow.RegisterOptions{
 		DisableAlreadyRegisteredCheck: true,
 	})
@@ -163,9 +175,12 @@ func (e *TestWorkflowEnvironment) RegisterWorkflow(w any) {
 
 func (e *TestWorkflowEnvironment) RegisterWorkflowWithOptions(w any, options workflow.RegisterOptions) {
 	e.TestWorkflowEnvironment.RegisterWorkflowWithOptions(w, options)
+	fnName, _ := getFunctionName(w)
+	// double registration can mess this up.
+	reg := wfRegistration{fn: w, alias: options.Name}
+	e.wfRegistrations[fnName] = reg
 	if options.Name != "" {
-		fnName, _ := getFunctionName(w)
-		e.wfAliasRef[fnName] = options.Name
+		e.wfRegistrations[options.Name] = reg
 	}
 	options.DisableAlreadyRegisteredCheck = true
 	e.worker().RegisterWorkflowWithOptions(w, options)
@@ -183,7 +198,7 @@ func (e *TestWorkflowEnvironment) OnWorkflow(workflowFn any, args ...any) *MockC
 			DisableAlreadyRegisteredCheck: true,
 		})
 		name, _ = getFunctionName(workflowFn)
-		if alias, ok := e.wfAliasRef[name]; ok {
+		if alias := e.wfRegistrations[name].alias; alias != "" {
 			name = alias
 		}
 	}
@@ -223,24 +238,20 @@ func (e *TestWorkflowEnvironment) mirrorOnDevServer(workflowFn any, args []any) 
 	// it may be a good idea to use shared workers.
 	w := e.worker()
 
-	// If the workflow is registered with an alias, the client needs to start
-	// execution with that alias in order to match the alias workflow type,
-	// otherwise it will start an execution with the string representation
-	// of the function name.
-	//
-	// When workflowFn is already a string, the workflow test environment will
-	// panic without an explicit registration, so we need to do nothing there
-	// since we will already have a registration on the worker.
+	// The mirrored execution always runs the workflow function under its own
+	// name, even if it was registered or executed with an alias. When
+	// workflowFn is a string, the workflow test environment would have
+	// already panicked without a registration, so we just have to find the
+	// function.
 	wf := workflowFn
-	if _, ok := workflowFn.(string); !ok {
-		w.RegisterWorkflowWithOptions(workflowFn, workflow.RegisterOptions{
-			DisableAlreadyRegisteredCheck: true,
-		})
-		fnName, _ := getFunctionName(workflowFn)
-		if alias, ok := e.wfAliasRef[fnName]; ok {
-			wf = alias
-		}
+	if name, ok := workflowFn.(string); ok {
+		wf = e.wfRegistrations[name].fn
 	}
+	// Registration is needed anyway e.g. when you call ExecuteWorkflow in test
+	// suite for a function without a prior registration.
+	w.RegisterWorkflowWithOptions(wf, workflow.RegisterOptions{
+		DisableAlreadyRegisteredCheck: true,
+	})
 
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("start worker: %w", err)

@@ -1,6 +1,5 @@
 Featuers I want to cover:
 
-- finish up suite wrapper
 - continue as new
 - workflow task failures e.g. panic
 - signals, queries
@@ -15,6 +14,8 @@ executions in test
 - allow passing in an explicit client to test workflow suite, not just via env var
 - maybe we can stream replays from an external source so we don't have to download
 it locally.
+- aliasing may not work under replay, if the replayer does not have the alias
+available.
 
 Maybe:
 

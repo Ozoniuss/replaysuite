@@ -73,7 +73,7 @@ func (s *WorkflowTestSuite) NewTestWorkflowEnvironment() *TestWorkflowEnvironmen
 		actMocked:               map[string]struct{}{},
 		wfMocked:                map[string]struct{}{},
 		actAliasRef:             map[string]string{},
-		wfAliasRef:              map[string]string{},
+		wfRegistrations:         map[string]wfRegistration{},
 		historiesDir:            historiesDir,
 	}
 }

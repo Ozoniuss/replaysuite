@@ -45,7 +45,20 @@ but still be able to execute previous histories. Keep in mind that for this to
 work properly, all workflow test suites that execute a specific function must 
 use the same key. Note that this key is not related to the workflow alias.
 
-Generally, it is recommended to avoid registering workflows under an alias.
+## Aliasing
+
+Using workflow or activity aliases can cause replay tests to fail when the
+workflow code does not actually invoke the function through its alias, since the
+replayer would need to be aware of the alias. Therefore, the only case where
+replay tests will guarantee correct behavior when aliases are used during
+registration is when child workflows and activities are explicitly invoked with
+those aliases.
+
+Note that the SDK warns about always using the alias name when a registration
+has one:
+
+>  Also users should always use this string name when executing this workflow
+from a client or inside a workflow as a child workflow.
 
 ## Limitations
 
@@ -98,9 +111,8 @@ func Test_Workflow_FuncRegisteredWithAndWithoutCustomNameKeepsBothNames(t *testi
 }
 ```
 
-Replay suite will try to follow the SDK behavior in these cases (in terms of
-which workflow type gets scheduled), but it does recommend to only register the 
-workflow you want to test once and will only guarantee a stable behavior in that scenario.
+Replay suite will only guarantee a correct behavior when the is a single
+registration for a workflow or activity.
 
 When activities are registered with a custom name, the Temporal SDK recommends
 always referring to them by that name. For such activities, replaysuite only

@@ -115,7 +115,7 @@ func newTestEnv(t *testing.T, s testsuite.WorkflowTestSuite) *TestWorkflowEnviro
 		actMocked:               map[string]struct{}{},
 		wfMocked:                map[string]struct{}{},
 		actAliasRef:             map[string]string{},
-		wfAliasRef:              map[string]string{},
+		wfRegistrations:         map[string]wfRegistration{},
 		historiesDir:            defaultHistoriesDir,
 	}
 }
@@ -975,12 +975,14 @@ func TestEnvironment_WorkflowRegisteredWithAlias(t *testing.T) {
 		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
 	}, eventTypes)
 
-	require.Equal(t, WorkflowRegisteredWithAliasName, hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	// The mirrored execution always runs under the function name, unlike the
+	// SDK test environment.
+	require.Equal(t, "WorkflowRegisteredWithAlias", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 	require.Equal(t, "ActivityWorkflowRegisteredWithAlias", hist.Events[4].GetActivityTaskScheduledEventAttributes().GetActivityType().GetName())
 
 	var mirrorResult string
 	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[10].GetWorkflowExecutionCompletedEventAttributes().GetResult(), &mirrorResult))
-	require.Equal(t, WorkflowRegisteredWithAliasName, mirrorResult)
+	require.Equal(t, "WorkflowRegisteredWithAlias", mirrorResult)
 }
 
 // === Workflow under test registered with a custom name and executed by that
@@ -1022,11 +1024,13 @@ func TestEnvironment_WorkflowExecutedByAlias(t *testing.T) {
 		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
 	}, eventTypes)
 
-	require.Equal(t, WorkflowExecutedByAliasName, hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
+	// The mirrored execution always runs under the function name, unlike the
+	// SDK test environment.
+	require.Equal(t, "WorkflowExecutedByAlias", hist.Events[0].GetWorkflowExecutionStartedEventAttributes().GetWorkflowType().GetName())
 
 	var mirrorResult string
 	require.NoError(t, converter.GetDefaultDataConverter().FromPayloads(hist.Events[4].GetWorkflowExecutionCompletedEventAttributes().GetResult(), &mirrorResult))
-	require.Equal(t, WorkflowExecutedByAliasName, mirrorResult)
+	require.Equal(t, "WorkflowExecutedByAlias", mirrorResult)
 }
 
 // === Mock via name, called via name in workflow, function itself has different
