@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/workflow"
 )
 
 func Test_Workflow_FirstMockWins(t *testing.T) {
@@ -445,4 +446,125 @@ func Test_Workflow_UnmockedChildWorkflowRuns(t *testing.T) {
 
 	assert.Equal(t, "Other word", result)
 	assert.Equal(t, int32(1), echoNameRuns.Load())
+}
+
+func Test_Workflow_ExecutingFuncRegisteredWithCustomNameUsesCustomName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(WorkflowTypeThatIsAliased, workflow.RegisterOptions{
+		Name: "AliasedWorkflowTypeName",
+	})
+
+	env.ExecuteWorkflow(WorkflowTypeThatIsAliased)
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result string
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, "AliasedWorkflowTypeName", result)
+}
+
+func Test_Workflow_ExecutingCustomNameRunsFuncRegisteredWithCustomName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(WorkflowTypeThatIsAliased, workflow.RegisterOptions{
+		Name: "AliasedWorkflowTypeName",
+	})
+
+	env.ExecuteWorkflow("AliasedWorkflowTypeName")
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result string
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, "AliasedWorkflowTypeName", result)
+}
+
+func Test_Workflow_PanicsIfExecutingUnregisteredWorkflowName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+
+	require.PanicsWithError(t, "unable to find workflow type: WorkflowTypeThatIsAliased. Supported types: []", func() {
+		env.ExecuteWorkflow("WorkflowTypeThatIsAliased")
+	})
+}
+
+func Test_Workflow_ExecutingFuncRegisteredWithEmptyCustomNameUsesFuncName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(WorkflowTypeThatIsAliased, workflow.RegisterOptions{
+		Name: "",
+	})
+
+	env.ExecuteWorkflow(WorkflowTypeThatIsAliased)
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result string
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, "WorkflowTypeThatIsAliased", result)
+}
+
+func Test_Workflow_ExecutingFuncNameRunsFuncRegisteredWithEmptyCustomName(t *testing.T) {
+	t.Parallel()
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(WorkflowTypeThatIsAliased, workflow.RegisterOptions{
+		Name: "",
+	})
+
+	env.ExecuteWorkflow("WorkflowTypeThatIsAliased")
+
+	require.True(t, env.IsWorkflowCompleted())
+	var result string
+	require.Nil(t, env.GetWorkflowResult(&result))
+
+	assert.Equal(t, "WorkflowTypeThatIsAliased", result)
+}
+
+func Test_Workflow_FuncRegisteredWithAndWithoutCustomNameKeepsBothNames(t *testing.T) {
+	t.Parallel()
+
+	registerPlain := func(env *testsuite.TestWorkflowEnvironment) {
+		env.RegisterWorkflow(WorkflowTypeThatIsAliased)
+	}
+	registerAliased := func(env *testsuite.TestWorkflowEnvironment) {
+		env.RegisterWorkflowWithOptions(WorkflowTypeThatIsAliased, workflow.RegisterOptions{
+			Name: "AliasedWorkflowTypeName",
+		})
+	}
+
+	orders := map[string][]func(*testsuite.TestWorkflowEnvironment){
+		"plain first":   {registerPlain, registerAliased},
+		"aliased first": {registerAliased, registerPlain},
+	}
+	executions := []struct {
+		workflow any
+		wantType string
+	}{
+		{WorkflowTypeThatIsAliased, "AliasedWorkflowTypeName"},
+		{"WorkflowTypeThatIsAliased", "WorkflowTypeThatIsAliased"},
+		{"AliasedWorkflowTypeName", "AliasedWorkflowTypeName"},
+	}
+
+	for order, registrations := range orders {
+		for _, ex := range executions {
+			s := testsuite.WorkflowTestSuite{}
+			env := s.NewTestWorkflowEnvironment()
+			for _, register := range registrations {
+				register(env)
+			}
+
+			env.ExecuteWorkflow(ex.workflow)
+
+			require.True(t, env.IsWorkflowCompleted(), "%s: %v", order, ex.workflow)
+			var result string
+			require.Nil(t, env.GetWorkflowResult(&result), "%s: %v", order, ex.workflow)
+			assert.Equal(t, ex.wantType, result, "%s: %v", order, ex.workflow)
+		}
+	}
 }

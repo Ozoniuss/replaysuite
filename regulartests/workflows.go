@@ -149,3 +149,7 @@ func (a *Activities) EchoName(ctx context.Context, name string) (string, error) 
 	activity.GetLogger(ctx).Info("EchoName", "name", name)
 	return name, nil
 }
+
+func WorkflowTypeThatIsAliased(ctx workflow.Context) (string, error) {
+	return workflow.GetInfo(ctx).WorkflowType.Name, nil
+}
